@@ -156,3 +156,26 @@ td small { margin-top: .2rem; color: var(--muted); }
 @media (min-width:761px){.agenda-list{display:block}}
 
 .status-cancelled{opacity:.6;text-decoration:line-through}.status-postponed{border-style:dashed!important}.event-actions{flex-wrap:wrap}.danger-text{color:#a32626!important}
+
+.calendar-event.rest{background:color-mix(in srgb,#7c8aa0 18%,white);border-left:4px solid #7c8aa0}.agenda-event.rest{border-left:5px solid #7c8aa0;background:color-mix(in srgb,#7c8aa0 7%,white)}
+
+.conflict-section{margin-top:1.25rem}.conflict-card{border:1px solid var(--border,#d8ded9);border-radius:16px;padding:1rem;margin:.8rem 0;background:rgba(255,255,255,.65)}.conflict-card h3{margin:.1rem 0 .5rem}.conflict-card small{display:block;margin-top:.55rem;opacity:.72}.conflict-compare{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.75rem 0}.conflict-compare>div{border-radius:12px;padding:.75rem;background:rgba(0,0,0,.035);display:flex;flex-direction:column;gap:.25rem}@media(max-width:700px){.conflict-compare{grid-template-columns:1fr}}
+
+/* 0.5.10: color visual por división */
+.division-color-dot{display:inline-block;width:.75rem;height:.75rem;border-radius:999px;background:var(--division-color);margin-right:.45rem;vertical-align:.02rem;box-shadow:0 0 0 2px color-mix(in srgb,var(--division-color) 18%,white)}
+.calendar-event{border-left:4px solid var(--division-color,#64748b)}
+.calendar-event.match{background:var(--division-strong,var(--division-color,#64748b));color:white}
+.calendar-event.match small{color:rgba(255,255,255,.82)}
+.calendar-event.training{background:var(--division-medium,color-mix(in srgb,var(--division-color,#64748b) 48%,white));color:#17202a}
+.calendar-event.rest{background:var(--division-light,color-mix(in srgb,var(--division-color,#64748b) 16%,white));border-left:4px dashed var(--division-color,#64748b);color:#27313a}
+.agenda-event{border-left:5px solid var(--division-color,#64748b)}
+.agenda-event.match{border-left-color:var(--division-strong,var(--division-color,#64748b));background:var(--division-light,#f8fafc)}
+.agenda-event.training{border-left-color:var(--division-medium,var(--division-color,#64748b));background:color-mix(in srgb,var(--division-light,#f8fafc) 70%,white)}
+.agenda-event.rest{border-left:5px dashed var(--division-color,#64748b);background:var(--division-light,#f8fafc)}
+
+
+/* 0.5.12: preview de matices derivados del color base de la división */
+.division-color-preview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;margin:.8rem 0 1.1rem}
+.division-swatch{min-height:72px;padding:.75rem;border-radius:.85rem;background:var(--swatch);display:flex;flex-direction:column;justify-content:flex-end;border:1px solid rgba(0,0,0,.08)}
+.division-swatch strong{font-size:.86rem}.division-swatch small{font-size:.72rem;opacity:.72}.division-swatch.strong{color:white}.division-swatch.strong small{color:rgba(255,255,255,.82)}
+@media(max-width:600px){.division-color-preview{grid-template-columns:1fr}.division-swatch{min-height:54px}}

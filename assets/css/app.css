@@ -96,3 +96,30 @@ footer { padding: 1.2rem; color: var(--muted); text-align: center; font-size: .8
   .button-row { flex-direction: column; }
   .button { width: 100%; }
 }
+
+select, textarea { width: 100%; padding: .85rem .95rem; border: 1px solid var(--line); border-radius: .75rem; color: var(--ink); background: white; outline: none; font: inherit; }
+select:focus, textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent); }
+textarea { resize: vertical; min-height: 88px; }
+.subnav { display: flex; gap: .45rem; flex-wrap: wrap; margin: 0 0 1rem; padding: .45rem; border: 1px solid var(--line); border-radius: 1rem; background: rgba(255,255,255,.88); }
+.subnav-link { border: 0; border-radius: .7rem; padding: .65rem .85rem; color: var(--muted); background: transparent; cursor: pointer; font-weight: 800; }
+.subnav-link.active { color: white; background: var(--brand); }
+.management-panel { min-height: 360px; }
+.table-wrap { width: 100%; overflow-x: auto; margin-top: 1rem; }
+table { width: 100%; border-collapse: collapse; min-width: 720px; }
+th, td { padding: .85rem .75rem; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
+td strong, td small { display: block; }
+td small { margin-top: .2rem; color: var(--muted); }
+.badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .28rem .55rem; font-size: .72rem; font-weight: 850; letter-spacing: .04em; }
+.badge.active { color: #126438; background: #dcf4e5; }
+.badge.inactive { color: #6a5140; background: #f0eae4; }
+.badge.ended { color: #5e5b68; background: #ecebf0; }
+.button.mini { padding: .48rem .7rem; font-size: .8rem; }
+.empty-state { margin-top: 1rem; padding: 2.2rem 1rem; border: 1px dashed var(--line); border-radius: 1rem; color: var(--muted); text-align: center; background: #fafcfb; }
+.inline-editor { margin-top: 1.5rem; padding: 1.35rem; border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line)); border-radius: 1rem; background: color-mix(in srgb, var(--brand) 4%, white); }
+.editor-heading, .editor-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.editor-heading h3 { margin: 0; }
+.editor-heading p { margin: .3rem 0 1rem; color: var(--muted); }
+.editor-actions { align-items: center; }
+.editor-actions .message { margin: 0; }
+@media (max-width: 700px) { .editor-heading, .editor-actions { flex-direction: column; align-items: stretch; } .subnav { display: grid; grid-template-columns: repeat(2, 1fr); } }

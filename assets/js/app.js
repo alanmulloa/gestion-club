@@ -4,6 +4,8 @@ const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
+let structureData = null;
+let structureSection = 'people';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -99,13 +101,13 @@ function shell(content, active = 'home') {
       <div class="brand">${brandMarkup()}</div>
       ${currentUser ? `<div class="session"><span>${escapeHtml(currentUser.email)}</span><button class="button ghost" id="logout">Salir</button></div>` : ''}
     </header>
-    ${currentUser ? `<nav class="nav"><button class="nav-link ${active === 'home' ? 'active' : ''}" data-nav="home">Inicio</button><button class="nav-link ${active === 'settings' ? 'active' : ''}" data-nav="settings">Configuración</button></nav>` : ''}
+    ${currentUser ? `<nav class="nav"><button class="nav-link ${active === 'home' ? 'active' : ''}" data-nav="home">Inicio</button><button class="nav-link ${active === 'structure' ? 'active' : ''}" data-nav="structure">Estructura</button><button class="nav-link ${active === 'settings' ? 'active' : ''}" data-nav="settings">Configuración</button></nav>` : ''}
     <main class="container">${content}</main>
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
   if (logoutButton) logoutButton.onclick = logout;
   document.querySelectorAll('[data-nav]').forEach(button => {
-    button.onclick = () => button.dataset.nav === 'settings' ? renderClubSettings() : renderDashboard();
+    button.onclick = () => button.dataset.nav === 'settings' ? renderClubSettings() : button.dataset.nav === 'structure' ? renderStructure() : renderDashboard();
   });
 }
 
@@ -176,24 +178,25 @@ function statusCard(title, state, detail) {
 }
 
 async function renderDashboard() {
-  if (!clubConfig && currentUser?.role === 'ADMIN') await loadClubConfig();
+  if (!clubConfig) await loadClubConfig();
   const clubName = clubConfig?.officialName || 'Tu club todavía no está configurado';
   const season = clubConfig?.activeSeason?.name || 'Sin temporada activa';
   shell(`
     <section class="hero">
       <span class="eyebrow">Panel de administración</span>
       <h1>${escapeHtml(clubName)}</h1>
-      <p>${escapeHtml(season)}. La infraestructura está operativa y ya podés configurar la identidad del club.</p>
+      <p>${escapeHtml(season)}. Administrá personas, cargos, divisiones, equipos y sus asignaciones.</p>
     </section>
     <section class="quick-grid">
+      <article class="quick-card"><span class="eyebrow">Gestión</span><h2>Estructura deportiva</h2><p>Personas, cargos, divisiones, equipos y asignaciones múltiples.</p><button class="button primary" id="go-structure">Abrir estructura</button></article>
       <article class="quick-card"><span class="eyebrow">Club</span><h2>Configuración</h2><p>Nombre, logo, colores y temporada activa.</p><button class="button secondary" id="go-settings">Abrir configuración</button></article>
-      <article class="quick-card muted-card"><span class="eyebrow">Próxima fase</span><h2>Personas</h2><p>Jugadores, entrenadores, managers, colaboradores y tutores.</p><button class="button secondary" disabled>Próximamente</button></article>
     </section>
     <section class="panel">
       <div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend y almacenamiento.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div>
       <div id="status-grid" class="status-grid">${statusCard('Autenticación', true, currentUser?.email || 'Sesión activa')}${statusCard('Backend', false, 'Comprobando…')}${statusCard('Google Sheets', false, 'Comprobando…')}${statusCard('Google Drive', false, 'Comprobando…')}</div>
     </section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
+  document.getElementById('go-structure').onclick = () => renderStructure();
   document.getElementById('go-settings').onclick = renderClubSettings;
   document.getElementById('refresh-status').onclick = loadStatus;
   await loadStatus();
@@ -346,6 +349,208 @@ async function renderClubSettings() {
   };
 }
 
+
+async function loadStructureData() {
+  const { data } = await call('getStructureData');
+  structureData = data;
+  return data;
+}
+
+function structureTabs() {
+  const tabs = [
+    ['people', 'Personas'], ['roles', 'Cargos'], ['divisions', 'Divisiones'], ['teams', 'Equipos'], ['assignments', 'Asignaciones']
+  ];
+  return `<div class="subnav">${tabs.map(([key, label]) => `<button type="button" class="subnav-link ${structureSection === key ? 'active' : ''}" data-structure-tab="${key}">${label}</button>`).join('')}</div>`;
+}
+
+function optionList(items, valueKey, labelFn, selected = '', includeEmpty = true) {
+  const empty = includeEmpty ? '<option value="">— Sin asignar —</option>' : '';
+  return empty + items.map(item => `<option value="${escapeHtml(item[valueKey])}" ${item[valueKey] === selected ? 'selected' : ''}>${escapeHtml(labelFn(item))}</option>`).join('');
+}
+
+function statusBadge(status) {
+  const normalized = String(status || '').toUpperCase();
+  const cls = normalized === 'ACTIVE' ? 'active' : normalized === 'ENDED' ? 'ended' : 'inactive';
+  return `<span class="badge ${cls}">${escapeHtml(normalized || '—')}</span>`;
+}
+
+function emptyTable(message) {
+  return `<div class="empty-state">${escapeHtml(message)}</div>`;
+}
+
+async function renderStructure(section = structureSection) {
+  structureSection = section;
+  if (!['ADMIN', 'MANAGER'].includes(currentUser?.role)) {
+    return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>Solo administradores y managers autorizados pueden gestionar la estructura.</p></section>', 'structure');
+  }
+  try { await loadStructureData(); }
+  catch (error) { return shell(`<section class="panel narrow"><h1>No se pudo cargar la estructura</h1><p>${escapeHtml(error.message)}</p></section>`, 'structure'); }
+
+  let content = '';
+  if (structureSection === 'people') content = renderPeopleSection();
+  else if (structureSection === 'roles') content = renderRolesSection();
+  else if (structureSection === 'divisions') content = renderDivisionsSection();
+  else if (structureSection === 'teams') content = renderTeamsSection();
+  else content = renderAssignmentsSection();
+
+  shell(`
+    <section class="hero compact">
+      <span class="eyebrow">Estructura deportiva</span>
+      <h1>Personas y organización</h1>
+      <p>Una persona puede tener varios cargos y participar en distintas divisiones o equipos sin duplicarse.</p>
+    </section>
+    ${structureTabs()}
+    ${content}
+    <div id="structure-message" class="message" aria-live="polite"></div>`, 'structure');
+
+  document.querySelectorAll('[data-structure-tab]').forEach(button => {
+    button.onclick = () => renderStructure(button.dataset.structureTab);
+  });
+  wireStructureSection();
+}
+
+function renderPeopleSection() {
+  const people = structureData?.persons || [];
+  const rows = people.map(person => `<tr>
+    <td><strong>${escapeHtml(person.displayName)}</strong><small>${escapeHtml(person.email || 'Sin correo')}</small></td>
+    <td>${escapeHtml(person.phone || '—')}</td>
+    <td>${escapeHtml(person.birthDate || '—')}</td>
+    <td>${statusBadge(person.status)}</td>
+    <td><button class="button mini secondary" data-edit-person="${escapeHtml(person.personId)}">Editar</button></td>
+  </tr>`).join('');
+  return `<section class="panel management-panel">
+    <div class="panel-heading"><div><h2>Personas</h2><p>Registro único para jugadores, entrenadores, managers y colaboradores.</p></div><button class="button primary" id="new-person">Nueva persona</button></div>
+    ${people.length ? `<div class="table-wrap"><table><thead><tr><th>Persona</th><th>Teléfono</th><th>Nacimiento</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay personas cargadas.')}
+    <div id="editor-host"></div>
+  </section>`;
+}
+
+function renderRolesSection() {
+  const roles = structureData?.roles || [];
+  const labels = { COACH:'Entrenador', MANAGER:'Manager', REFEREE:'Árbitro', COORDINATOR:'Coordinador', COLLABORATOR:'Colaborador', ADMINISTRATIVE:'Administrativo', PLAYER:'Jugador', OTHER:'Otro' };
+  const rows = roles.map(role => `<tr><td><strong>${escapeHtml(role.name)}</strong><small>${escapeHtml(role.description || '')}</small></td><td>${escapeHtml(labels[role.category] || role.category)}</td><td>${escapeHtml(role.scopeType)}</td><td>${statusBadge(role.status)}</td><td><button class="button mini secondary" data-edit-role="${escapeHtml(role.roleId)}">Editar</button></td></tr>`).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Cargos</h2><p>Los cargos son configurables y no equivalen automáticamente a permisos de seguridad.</p></div><button class="button primary" id="new-role">Nuevo cargo</button></div>${roles.length ? `<div class="table-wrap"><table><thead><tr><th>Cargo</th><th>Categoría</th><th>Alcance</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay cargos configurados.')}<div id="editor-host"></div></section>`;
+}
+
+function renderDivisionsSection() {
+  const divisions = structureData?.divisions || [];
+  const rows = divisions.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.code || '')}</small></td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-division="${escapeHtml(item.divisionId)}">Editar</button></td></tr>`).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones</h2><p>Se vinculan a la temporada activa para conservar histórico.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones para la temporada activa.')}<div id="editor-host"></div></section>`;
+}
+
+function renderTeamsSection() {
+  const teams = structureData?.teams || [];
+  const divisions = Object.fromEntries((structureData?.divisions || []).map(d => [d.divisionId, d]));
+  const rows = teams.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.code || '')}</small></td><td>${escapeHtml(divisions[item.divisionId]?.name || '—')}</td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-team="${escapeHtml(item.teamId)}">Editar</button></td></tr>`).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Equipos</h2><p>Una división puede tener uno o varios equipos.</p></div><button class="button primary" id="new-team">Nuevo equipo</button></div>${teams.length ? `<div class="table-wrap"><table><thead><tr><th>Equipo</th><th>División</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay equipos creados.')}<div id="editor-host"></div></section>`;
+}
+
+function renderAssignmentsSection() {
+  const data = structureData || {};
+  const people = Object.fromEntries((data.persons || []).map(x => [x.personId, x]));
+  const roles = Object.fromEntries((data.roles || []).map(x => [x.roleId, x]));
+  const divisions = Object.fromEntries((data.divisions || []).map(x => [x.divisionId, x]));
+  const teams = Object.fromEntries((data.teams || []).map(x => [x.teamId, x]));
+  const rows = (data.assignments || []).map(item => `<tr>
+    <td><strong>${escapeHtml(people[item.personId]?.displayName || '—')}</strong><small>${escapeHtml(roles[item.roleId]?.name || '—')}</small></td>
+    <td>${escapeHtml(divisions[item.divisionId]?.name || 'Transversal')}</td><td>${escapeHtml(teams[item.teamId]?.name || '—')}</td>
+    <td>${escapeHtml(item.startDate || '—')}${item.endDate ? ' → ' + escapeHtml(item.endDate) : ''}</td><td>${statusBadge(item.status)}</td>
+    <td><button class="button mini secondary" data-edit-assignment="${escapeHtml(item.assignmentId)}">Editar</button></td></tr>`).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Relacioná personas con cargos, divisiones y equipos. División y equipo pueden quedar vacíos para funciones transversales.</p></div><button class="button primary" id="new-assignment">Nueva asignación</button></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Equipo</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay asignaciones.')}<div id="editor-host"></div></section>`;
+}
+
+function wireStructureSection() {
+  const bind = (selector, handler) => document.querySelectorAll(selector).forEach(button => button.onclick = () => handler(button.dataset));
+  document.getElementById('new-person')?.addEventListener('click', () => showPersonEditor());
+  document.getElementById('new-role')?.addEventListener('click', () => showRoleEditor());
+  document.getElementById('new-division')?.addEventListener('click', () => showDivisionEditor());
+  document.getElementById('new-team')?.addEventListener('click', () => showTeamEditor());
+  document.getElementById('new-assignment')?.addEventListener('click', () => showAssignmentEditor());
+  bind('[data-edit-person]', data => showPersonEditor((structureData.persons || []).find(x => x.personId === data.editPerson)));
+  bind('[data-edit-role]', data => showRoleEditor((structureData.roles || []).find(x => x.roleId === data.editRole)));
+  bind('[data-edit-division]', data => showDivisionEditor((structureData.divisions || []).find(x => x.divisionId === data.editDivision)));
+  bind('[data-edit-team]', data => showTeamEditor((structureData.teams || []).find(x => x.teamId === data.editTeam)));
+  bind('[data-edit-assignment]', data => showAssignmentEditor((structureData.assignments || []).find(x => x.assignmentId === data.editAssignment)));
+}
+
+function editorShell(title, description, fields, submitLabel = 'Guardar') {
+  const host = document.getElementById('editor-host');
+  if (!host) return;
+  host.innerHTML = `<section class="inline-editor"><div class="editor-heading"><div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div><button type="button" class="button link" id="close-editor">Cerrar</button></div><form id="entity-form" class="form-stack">${fields}<div class="editor-actions"><div id="editor-message" class="message"></div><button class="button primary" type="submit">${escapeHtml(submitLabel)}</button></div></form></section>`;
+  document.getElementById('close-editor').onclick = () => { host.innerHTML = ''; };
+  host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showPersonEditor(person = {}) {
+  editorShell(person.personId ? 'Editar persona' : 'Nueva persona', 'La persona se registra una única vez aunque tenga varios cargos.', `
+    <div class="form-grid two"><label>Nombre<input id="person-first" maxlength="80" required value="${escapeHtml(person.firstName || '')}"></label><label>Apellidos<input id="person-last" maxlength="120" required value="${escapeHtml(person.lastName || '')}"></label></div>
+    <div class="form-grid two"><label>Correo<input id="person-email" type="email" maxlength="254" value="${escapeHtml(person.email || '')}"></label><label>Teléfono<input id="person-phone" maxlength="40" value="${escapeHtml(person.phone || '')}"></label></div>
+    <div class="form-grid two"><label>Fecha de nacimiento<input id="person-birth" type="date" value="${escapeHtml(person.birthDate || '')}"></label><label>Estado<select id="person-status"><option value="ACTIVE" ${person.status !== 'INACTIVE' && person.status !== 'ARCHIVED' ? 'selected' : ''}>Activo</option><option value="INACTIVE" ${person.status === 'INACTIVE' ? 'selected' : ''}>Inactivo</option><option value="ARCHIVED" ${person.status === 'ARCHIVED' ? 'selected' : ''}>Archivado</option></select></label></div>
+    <label>Notas internas<textarea id="person-notes" maxlength="500" rows="3">${escapeHtml(person.notes || '')}</textarea></label>`);
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'savePerson', { personId: person.personId || '', firstName: val('person-first'), lastName: val('person-last'), email: val('person-email'), phone: val('person-phone'), birthDate: val('person-birth'), status: val('person-status'), notes: val('person-notes') });
+}
+
+function showRoleEditor(role = {}) {
+  editorShell(role.roleId ? 'Editar cargo' : 'Nuevo cargo', 'El alcance orienta dónde puede aplicarse, pero una asignación puede seguir siendo transversal.', `
+    <label>Nombre del cargo<input id="role-name" maxlength="100" required value="${escapeHtml(role.name || '')}"></label>
+    <div class="form-grid two"><label>Categoría<select id="role-category">${[['COACH','Entrenador'],['MANAGER','Manager'],['REFEREE','Árbitro'],['COORDINATOR','Coordinador'],['COLLABORATOR','Colaborador'],['ADMINISTRATIVE','Administrativo'],['PLAYER','Jugador'],['OTHER','Otro']].map(([v,l]) => `<option value="${v}" ${role.category===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Alcance<select id="role-scope">${[['FLEXIBLE','Flexible'],['TRANSVERSAL','Transversal'],['DIVISION','División'],['TEAM','Equipo']].map(([v,l]) => `<option value="${v}" ${role.scopeType===v?'selected':''}>${l}</option>`).join('')}</select></label></div>
+    <label>Descripción<textarea id="role-description" maxlength="300" rows="3">${escapeHtml(role.description || '')}</textarea></label>
+    <label>Estado<select id="role-status"><option value="ACTIVE" ${role.status !== 'INACTIVE' ? 'selected' : ''}>Activo</option><option value="INACTIVE" ${role.status === 'INACTIVE' ? 'selected' : ''}>Inactivo</option></select></label>`);
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveRole', { roleId: role.roleId || '', name: val('role-name'), category: val('role-category'), scopeType: val('role-scope'), description: val('role-description'), status: val('role-status') });
+}
+
+function showDivisionEditor(item = {}) {
+  editorShell(item.divisionId ? 'Editar división' : 'Nueva división', 'La división quedará ligada a la temporada activa.', `<div class="form-grid two"><label>Nombre<input id="division-name" maxlength="100" required value="${escapeHtml(item.name || '')}"></label><label>Código<input id="division-code" maxlength="30" value="${escapeHtml(item.code || '')}" placeholder="M16"></label></div><label>Estado<select id="division-status"><option value="ACTIVE" ${item.status !== 'INACTIVE' ? 'selected' : ''}>Activa</option><option value="INACTIVE" ${item.status === 'INACTIVE' ? 'selected' : ''}>Inactiva</option></select></label>`);
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveDivision', { divisionId: item.divisionId || '', name: val('division-name'), code: val('division-code'), status: val('division-status'), seasonId: item.seasonId || structureData.activeSeasonId || '' });
+}
+
+function showTeamEditor(item = {}) {
+  const divisions = (structureData.divisions || []).filter(x => x.status === 'ACTIVE' || x.divisionId === item.divisionId);
+  editorShell(item.teamId ? 'Editar equipo' : 'Nuevo equipo', 'Cada equipo pertenece a una división.', `<label>División<select id="team-division" required>${optionList(divisions, 'divisionId', x => x.name, item.divisionId || '', false)}</select></label><div class="form-grid two"><label>Nombre<input id="team-name" maxlength="100" required value="${escapeHtml(item.name || '')}"></label><label>Código<input id="team-code" maxlength="30" value="${escapeHtml(item.code || '')}"></label></div><label>Estado<select id="team-status"><option value="ACTIVE" ${item.status !== 'INACTIVE' ? 'selected' : ''}>Activo</option><option value="INACTIVE" ${item.status === 'INACTIVE' ? 'selected' : ''}>Inactivo</option></select></label>`);
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveTeam', { teamId: item.teamId || '', divisionId: val('team-division'), name: val('team-name'), code: val('team-code'), status: val('team-status') });
+}
+
+function showAssignmentEditor(item = {}) {
+  const activePeople = (structureData.persons || []).filter(x => x.status === 'ACTIVE' || x.personId === item.personId);
+  const activeRoles = (structureData.roles || []).filter(x => x.status === 'ACTIVE' || x.roleId === item.roleId);
+  const activeDivisions = (structureData.divisions || []).filter(x => x.status === 'ACTIVE' || x.divisionId === item.divisionId);
+  const teams = structureData.teams || [];
+  editorShell(item.assignmentId ? 'Editar asignación' : 'Nueva asignación', 'Dejá división y equipo vacíos para cargos transversales.', `
+    <div class="form-grid two"><label>Persona<select id="assignment-person" required>${optionList(activePeople,'personId',x=>x.displayName,item.personId||'',false)}</select></label><label>Cargo<select id="assignment-role" required>${optionList(activeRoles,'roleId',x=>x.name,item.roleId||'',false)}</select></label></div>
+    <div class="form-grid two"><label>División<select id="assignment-division">${optionList(activeDivisions,'divisionId',x=>x.name,item.divisionId||'')}</select></label><label>Equipo<select id="assignment-team">${optionList(teams,'teamId',x=>x.name,item.teamId||'')}</select></label></div>
+    <div class="form-grid two"><label>Desde<input id="assignment-start" type="date" value="${escapeHtml(item.startDate || '')}"></label><label>Hasta<input id="assignment-end" type="date" value="${escapeHtml(item.endDate || '')}"></label></div>
+    <label>Estado<select id="assignment-status"><option value="ACTIVE" ${item.status !== 'ENDED' ? 'selected' : ''}>Activa</option><option value="ENDED" ${item.status === 'ENDED' ? 'selected' : ''}>Finalizada</option></select></label>
+    <label>Notas<textarea id="assignment-notes" maxlength="500" rows="3">${escapeHtml(item.notes || '')}</textarea></label>`);
+  const divSelect = document.getElementById('assignment-division');
+  const teamSelect = document.getElementById('assignment-team');
+  const refreshTeams = () => {
+    const divId = divSelect.value;
+    const allowed = teams.filter(x => (!divId || x.divisionId === divId) && (x.status === 'ACTIVE' || x.teamId === item.teamId));
+    teamSelect.innerHTML = optionList(allowed, 'teamId', x => x.name, allowed.some(x => x.teamId === item.teamId) ? item.teamId : '');
+  };
+  divSelect.onchange = refreshTeams;
+  refreshTeams();
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: val('assignment-division'), teamId: val('assignment-team'), seasonId: item.seasonId || structureData.activeSeasonId || '', startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
+}
+
+function val(id) { return document.getElementById(id)?.value?.trim?.() ?? document.getElementById(id)?.value ?? ''; }
+
+async function submitEntity(event, action, payload) {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  showMessage('Guardando…', 'info', 'editor-message');
+  try {
+    await call(action, payload);
+    showMessage('Guardado correctamente.', 'success', 'editor-message');
+    await loadStructureData();
+    setTimeout(() => renderStructure(structureSection), 300);
+  } catch (error) {
+    showMessage(error.message, 'error', 'editor-message');
+    button.disabled = false;
+  }
+}
+
 function wireColorPair(prefix) {
   const picker = document.getElementById(prefix + '-color');
   const text = document.getElementById(prefix + '-text');
@@ -430,7 +635,7 @@ async function start() {
   try {
     const { data } = await call('status');
     currentUser = { email: data.actor.email, role: data.actor.role };
-    if (currentUser.role === 'ADMIN') await loadClubConfig();
+    await loadClubConfig();
     await renderDashboard();
   } catch (error) {
     if (!sessionToken) return renderLogin();

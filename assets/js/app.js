@@ -94,14 +94,52 @@ function brandMarkup() {
   return `${logo}<div><strong>${escapeHtml(name)}</strong><small>Versión ${escapeHtml(config.appVersion || '?')} · ${escapeHtml(config.environment || 'sin configurar')}</small></div>`;
 }
 
+function roleDisplayName(role) {
+  return ({ADMIN:'Administrador',MANAGER:'Manager',COACH:'Entrenador',REFEREE:'Árbitro',PLAYER:'Jugador',TUTOR:'Tutor',COLLABORATOR:'Colaborador'})[role] || role || '';
+}
+
+function navigationForRole(role) {
+  const all = [
+    ['home','Inicio'],['structure','Estructura'],['families','Tutores'],['documents','Documentos'],['calendar','Calendario'],['users','Usuarios'],['settings','Configuración']
+  ];
+  if (role === 'MANAGER') return all.filter(x => ['home','structure','documents','calendar','users'].includes(x[0]));
+  if (role === 'COACH') return all.filter(x => ['home','structure','documents','calendar'].includes(x[0]));
+  if (role === 'REFEREE') return all.filter(x => ['home','documents','calendar'].includes(x[0]));
+  if (role === 'PLAYER') return all.filter(x => ['home','documents','calendar'].includes(x[0]));
+  if (role === 'TUTOR') return all.filter(x => ['home','families','documents','calendar'].includes(x[0]));
+  if (role === 'COLLABORATOR') return all.filter(x => ['home','documents','calendar'].includes(x[0]));
+  return all;
+}
+
+function navMarkup(active) {
+  if (!currentUser) return '';
+  return navigationForRole(currentUser.role).map(([key,label]) =>
+    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',users:'◎',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
+  ).join('');
+}
+
+function dashboardCardsForRole() {
+  const role=currentUser?.role || 'ADMIN';
+  const cards=[];
+  if (['ADMIN','MANAGER','COACH'].includes(role)) cards.push(['Actividad','Calendario deportivo','Entrenamientos, partidos, disponibilidad y convocatorias.','go-calendar','primary']);
+  if (['ADMIN','MANAGER','COACH'].includes(role)) cards.push(['Gestión','Estructura deportiva','Personas, cargos, divisiones, equipos y asignaciones.','go-structure','secondary']);
+  if (['ADMIN','MANAGER','COACH','REFEREE','PLAYER','TUTOR','COLLABORATOR'].includes(role)) cards.push(['Archivos','Documentación','Consultá y gestioná la documentación a la que tenés acceso.','go-documents','secondary']);
+  if (['ADMIN','MANAGER'].includes(role)) cards.push(['Acceso','Usuarios','Creación de cuentas, roles y accesos.','go-users','secondary']);
+  if (['ADMIN','MANAGER','TUTOR'].includes(role)) cards.push(['Familias','Tutores y menores','Relaciones entre menores y tutores autorizados.','go-families','secondary']);
+  if (role==='ADMIN') cards.push(['Club','Configuración','Nombre, logo, colores y temporada activa.','go-settings','secondary']);
+  return cards.map(c=>`<article class="quick-card role-card"><span class="eyebrow">${c[0]}</span><h2>${c[1]}</h2><p>${c[2]}</p><button class="button ${c[4]}" id="${c[3]}">${c[1]}</button></article>`).join('');
+}
+
+function isMobileViewport(){ return window.matchMedia && window.matchMedia('(max-width: 760px)').matches; }
+
 function shell(content, active = 'home') {
   root.className = '';
   root.innerHTML = `
     <header class="topbar">
       <div class="brand">${brandMarkup()}</div>
-      ${currentUser ? `<div class="session"><span>${escapeHtml(currentUser.email)}</span><button class="button ghost" id="logout">Salir</button></div>` : ''}
+      ${currentUser ? `<div class="session"><div class="session-copy"><span>${escapeHtml(currentUser.email)}</span><small>${escapeHtml(roleDisplayName(currentUser.role))}</small></div><button class="button ghost logout-button" id="logout">Salir</button></div>` : ''}
     </header>
-    ${currentUser ? `<nav class="nav"><button class="nav-link ${active === 'home' ? 'active' : ''}" data-nav="home">Inicio</button><button class="nav-link ${active === 'structure' ? 'active' : ''}" data-nav="structure">Estructura</button><button class="nav-link ${active === 'families' ? 'active' : ''}" data-nav="families">Tutores</button><button class="nav-link ${active === 'documents' ? 'active' : ''}" data-nav="documents">Documentos</button><button class="nav-link ${active === 'calendar' ? 'active' : ''}" data-nav="calendar">Calendario</button><button class="nav-link ${active === 'users' ? 'active' : ''}" data-nav="users">Usuarios</button><button class="nav-link ${active === 'settings' ? 'active' : ''}" data-nav="settings">Configuración</button></nav>` : ''}
+    ${currentUser ? `<nav class="nav">${navMarkup(active)}</nav>` : ''}
     <main class="container">${content}</main>
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
@@ -191,30 +229,24 @@ async function renderDashboard() {
   const clubName = clubConfig?.officialName || 'Tu club todavía no está configurado';
   const season = clubConfig?.activeSeason?.name || 'Sin temporada activa';
   shell(`
-    <section class="hero">
-      <span class="eyebrow">Panel de administración</span>
+    <section class="hero role-hero">
+      <span class="eyebrow">${escapeHtml(roleDisplayName(currentUser?.role))}</span>
       <h1>${escapeHtml(clubName)}</h1>
-      <p>${escapeHtml(season)}. Administrá personas, cargos, divisiones, equipos y sus asignaciones.</p>
+      <p>${escapeHtml(season)}. Accesos rápidos adaptados a tu función.</p>
     </section>
-    <section class="quick-grid">
-      <article class="quick-card"><span class="eyebrow">Gestión</span><h2>Estructura deportiva</h2><p>Personas, cargos, divisiones, equipos y asignaciones múltiples.</p><button class="button primary" id="go-structure">Abrir estructura</button></article>
-      <article class="quick-card"><span class="eyebrow">Familias</span><h2>Tutores y menores</h2><p>Relacioná menores con tutores autorizados para gestionar documentación.</p><button class="button secondary" id="go-families">Abrir tutores</button></article>
-      <article class="quick-card"><span class="eyebrow">Archivos</span><h2>Documentación</h2><p>Subida privada, versiones, revisión y vencimientos.</p><button class="button secondary" id="go-documents">Abrir documentos</button></article>
-      <article class="quick-card"><span class="eyebrow">Acceso</span><h2>Usuarios</h2><p>Creación de cuentas, roles, bloqueo y reset de contraseña.</p><button class="button secondary" id="go-users">Abrir usuarios</button></article>
-      <article class="quick-card"><span class="eyebrow">Actividad</span><h2>Calendario deportivo</h2><p>Entrenamientos, partidos, convocatorias, árbitros y asistencia.</p><button class="button secondary" id="go-calendar">Abrir calendario</button></article>
-      <article class="quick-card"><span class="eyebrow">Club</span><h2>Configuración</h2><p>Nombre, logo, colores y temporada activa.</p><button class="button secondary" id="go-settings">Abrir configuración</button></article>
-    </section>
+    <section class="quick-grid role-quick-grid">${dashboardCardsForRole()}</section>
     <section class="panel">
       <div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend y almacenamiento.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div>
       <div id="status-grid" class="status-grid">${statusCard('Autenticación', true, currentUser?.email || 'Sesión activa')}${statusCard('Backend', false, 'Comprobando…')}${statusCard('Google Sheets', false, 'Comprobando…')}${statusCard('Google Drive', false, 'Comprobando…')}</div>
     </section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
-  document.getElementById('go-structure').onclick = () => renderStructure();
-  document.getElementById('go-families').onclick = renderFamilies;
-  document.getElementById('go-documents').onclick = renderDocuments;
-  document.getElementById('go-users').onclick = renderUsers;
-  document.getElementById('go-calendar').onclick = renderCalendar;
-  document.getElementById('go-settings').onclick = renderClubSettings;
+  const wire=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
+  wire('go-structure',()=>renderStructure());
+  wire('go-families',renderFamilies);
+  wire('go-documents',renderDocuments);
+  wire('go-users',renderUsers);
+  wire('go-calendar',renderCalendar);
+  wire('go-settings',renderClubSettings);
   document.getElementById('refresh-status').onclick = loadStatus;
   await loadStatus();
 }
@@ -755,6 +787,7 @@ async function renderUsers(){
 let calendarData=null;
 let calendarCursor=new Date();
 let calendarView='month';
+let calendarViewTouched=false;
 
 function isoLocalDate(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
 function eventTypeLabel(t){return t==='TRAINING'?'Entrenamiento':'Partido';}
@@ -771,19 +804,31 @@ function renderMonthGrid(events){
 }
 function startOfWeek(d){const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.getDate()-day);x.setHours(0,0,0,0);return x;}
 function renderWeekGrid(events){const start=startOfWeek(calendarCursor),days=[];for(let i=0;i<7;i++){const d=new Date(start);d.setDate(start.getDate()+i);days.push(d);}const by={};events.forEach(e=>(by[e.eventDate]||(by[e.eventDate]=[])).push(e));return `<div class="week-grid">${days.map(d=>{const key=isoLocalDate(d);return `<div class="week-day"><h3>${d.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'})}</h3>${(by[key]||[]).length?(by[key]||[]).map(calendarEventLine).join(''):emptyTable('Sin actividad')}</div>`}).join('')}</div>`;}
+function renderAgenda(events){
+  const sorted=events.slice().sort((a,b)=>`${a.eventDate} ${a.startTime||''}`.localeCompare(`${b.eventDate} ${b.startTime||''}`));
+  if(!sorted.length) return emptyTable('Sin actividades para los filtros seleccionados.');
+  const groups={}; sorted.forEach(e=>(groups[e.eventDate]||(groups[e.eventDate]=[])).push(e));
+  return `<div class="agenda-list">${Object.keys(groups).sort().map(date=>{
+    const d=new Date(date+'T12:00:00'); const label=d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'});
+    return `<section class="agenda-day"><h3>${escapeHtml(label)}</h3>${groups[date].map(e=>`<button class="agenda-event ${e.eventType==='MATCH'?'match':'training'}" data-open-event="${e.eventId}"><span class="agenda-time">${escapeHtml(e.startTime||'—')}</span><span class="agenda-main"><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${escapeHtml(e.eventType==='MATCH'&&e.opponent?'vs '+e.opponent:(e.location||eventTypeLabel(e.eventType)))}</small></span><span class="agenda-chevron">›</span></button>`).join('')}</section>`;
+  }).join('')}</div>`;
+}
+
 
 async function renderCalendar(){
   try{const {data}=await call('getCalendarData',{});calendarData=data;}
   catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar el calendario</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
   const d=calendarData, divisionMap={},teamMap={};d.divisions.forEach(x=>divisionMap[x.divisionId]=x.name);d.teams.forEach(x=>teamMap[x.teamId]=x.name);
+  if(isMobileViewport()&&!calendarViewTouched) calendarView='agenda';
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
+  const renderCurrentCalendar=(events)=>calendarView==='month'?renderMonthGrid(events):calendarView==='week'?renderWeekGrid(events):renderAgenda(events);
   shell(`<section class="hero compact"><span class="eyebrow">Actividad deportiva</span><h1>Calendario</h1><p>Entrenamientos y partidos en una única vista.</p></section>
-  <section class="panel"><div class="calendar-toolbar"><div class="button-row"><button class="button secondary" id="cal-prev">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row"><button class="button ${calendarView==='month'?'primary':'secondary'}" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'}" id="cal-week">Semana</button>${d.canImportLeague?'<button class="button secondary" id="import-league">Importar liga</button>':''}${d.canCreate?'<button class="button primary" id="new-event">Nueva actividad</button>':''}</div></div><div class="form-grid three calendar-filters"><label>División<select id="cal-filter-division">${optionList(d.divisions,'divisionId',x=>x.name,'',true)}</select></label><label>Equipo<select id="cal-filter-team">${optionList(d.teams,'teamId',x=>x.name,'',true)}</select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING">Entrenamientos</option><option value="MATCH">Partidos</option></select></label></div><div id="calendar-host">${calendarView==='month'?renderMonthGrid(d.events):renderWeekGrid(d.events)}</div><div id="message" class="message"></div></section>`,'calendar');
-  const move=n=>{calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+(calendarView==='month'?n:0),calendarCursor.getDate()+(calendarView==='week'?7*n:0));renderCalendar();};
+  <section class="panel"><div class="calendar-toolbar"><div class="button-row"><button class="button secondary" id="cal-prev">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row"><button class="button ${calendarView==='agenda'?'primary':'secondary'}" id="cal-agenda">Agenda</button><button class="button ${calendarView==='month'?'primary':'secondary'}" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'}" id="cal-week">Semana</button>${d.canImportLeague?'<button class="button secondary" id="import-league">Importar liga</button>':''}${d.canCreate?'<button class="button primary" id="new-event">Nueva actividad</button>':''}</div></div><div class="form-grid three calendar-filters"><label>División<select id="cal-filter-division">${optionList(d.divisions,'divisionId',x=>x.name,'',true)}</select></label><label>Equipo<select id="cal-filter-team">${optionList(d.teams,'teamId',x=>x.name,'',true)}</select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING">Entrenamientos</option><option value="MATCH">Partidos</option></select></label></div><div id="calendar-host">${renderCurrentCalendar(d.events)}</div><div id="message" class="message"></div></section>`,'calendar');
+  const move=n=>{calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+(calendarView==='month'?n:0),calendarCursor.getDate()+((calendarView==='week'||calendarView==='agenda')?7*n:0));renderCalendar();};
   document.getElementById('cal-prev').onclick=()=>move(-1);document.getElementById('cal-next').onclick=()=>move(1);document.getElementById('cal-today').onclick=()=>{calendarCursor=new Date();renderCalendar();};
-  document.getElementById('cal-month').onclick=()=>{calendarView='month';renderCalendar();};document.getElementById('cal-week').onclick=()=>{calendarView='week';renderCalendar();};
+  document.getElementById('cal-agenda').onclick=()=>{calendarViewTouched=true;calendarView='agenda';renderCalendar();};document.getElementById('cal-month').onclick=()=>{calendarViewTouched=true;calendarView='month';renderCalendar();};document.getElementById('cal-week').onclick=()=>{calendarViewTouched=true;calendarView='week';renderCalendar();};
   const ib=document.getElementById('import-league');if(ib)ib.onclick=renderLeagueImport;const nb=document.getElementById('new-event');if(nb)nb.onclick=()=>renderEventEditor();
-  const applyFilters=()=>{const div=val('cal-filter-division'),team=val('cal-filter-team'),type=val('cal-filter-type');const filtered=d.events.filter(e=>(!div||e.divisionId===div)&&(!team||e.teamId===team)&&(!type||e.eventType===type));document.getElementById('calendar-host').innerHTML=calendarView==='month'?renderMonthGrid(filtered):renderWeekGrid(filtered);document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));};
+  const applyFilters=()=>{const div=val('cal-filter-division'),team=val('cal-filter-team'),type=val('cal-filter-type');const filtered=d.events.filter(e=>(!div||e.divisionId===div)&&(!team||e.teamId===team)&&(!type||e.eventType===type));document.getElementById('calendar-host').innerHTML=renderCurrentCalendar(filtered);document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));};
   ['cal-filter-division','cal-filter-team','cal-filter-type'].forEach(id=>document.getElementById(id).onchange=applyFilters);
   document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));
 }

@@ -237,7 +237,7 @@ async function renderDashboard() {
     <section class="quick-grid role-quick-grid">${dashboardCardsForRole()}</section>
     <section class="panel">
       <div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend y almacenamiento.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div>
-      <div id="status-grid" class="status-grid">${statusCard('Autenticación', true, currentUser?.email || 'Sesión activa')}${statusCard('Backend', false, 'Comprobando…')}${statusCard('Google Sheets', false, 'Comprobando…')}${statusCard('Google Drive', false, 'Comprobando…')}</div>
+      <div id="status-grid" class="status-grid">${statusCard('Autenticación', true, currentUser?.email || 'Sesión activa')}${statusCard('Backend', false, 'Comprobando…')}${statusCard('Google Sheets', false, 'Comprobando…')}${statusCard('Google Drive', false, 'Comprobando…')}${statusCard('Drive API v3', false, 'Comprobando…')}${statusCard('OCR PDF', false, 'Comprobando…')}</div>
     </section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
   const wire=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
@@ -262,7 +262,9 @@ async function loadStatus() {
       statusCard('Autenticación', data.authenticated, `${data.actor.email} · ${data.actor.role}`),
       statusCard('Backend', data.backend.ok, `v${data.backend.version} · ${data.backend.environment}`),
       statusCard('Google Sheets', data.sheets.ok, `${data.sheets.spreadsheetName} · ${data.sheets.requiredSheets} hojas`),
-      statusCard('Google Drive', data.drive.ok, data.drive.rootFolderName)
+      statusCard('Google Drive', data.drive.ok, data.drive.rootFolderName),
+      statusCard('Drive API v3', !!data.ocr?.ok, data.ocr?.ok ? `${data.ocr.apiVersion} · ${data.ocr.method}` : (data.ocr?.detail || 'No disponible')),
+      statusCard('OCR PDF', !!data.ocr?.ocrPdfReady, data.ocr?.ocrPdfReady ? 'Preparado · idioma español' : 'No disponible')
     ].join('');
     showMessage('Sistema disponible.', 'success');
   } catch (error) {
@@ -950,7 +952,7 @@ async function renderMatchPlanning(eventId){
     document.getElementById('planning-back').onclick=()=>renderEventDetail(eventId);document.querySelectorAll('[data-availability-person]').forEach(sel=>sel.onchange=async()=>{try{await call('setMatchAvailability',{eventId,personId:sel.dataset.availabilityPerson,status:sel.value,comment:''});showMessage('Disponibilidad guardada.','success');}catch(err){showMessage(err.message,'error');}});
     const sb=document.getElementById('save-lineup');if(sb)sb.onclick=async()=>{try{const lineup=[];document.querySelectorAll('[data-lineup-person]').forEach(ch=>{if(ch.checked){const id=ch.dataset.lineupPerson;lineup.push({personId:id,lineupRole:document.querySelector(`[data-lineup-role="${id}"]`).value,jerseyNumber:document.querySelector(`[data-lineup-number="${id}"]`).value});}});await call('saveMatchLineup',{eventId,lineup});showMessage('Equipo guardado.','success');setTimeout(()=>renderMatchPlanning(eventId),350);}catch(err){showMessage(err.message,'error');}};
     const ss=document.getElementById('save-match-stats');if(ss)ss.onclick=async()=>{try{const stats=[];document.querySelectorAll('[data-stat-row]').forEach(row=>{const x={};row.querySelectorAll('[data-stat-field]').forEach(el=>x[el.dataset.statField]=el.value);x.played='TRUE';stats.push(x);});await call('saveMatchStats',{eventId,stats});showMessage('Estadísticas guardadas.','success');}catch(err){showMessage(err.message,'error');}};
-    const rf=document.getElementById('report-form');if(rf)rf.onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('report-file').files?.[0];if(!f)return;try{showMessage('Subiendo y procesando acta…');const dataUrl=await fileToDataUrl(f);const {data:r}=await call('uploadMatchReport',{eventId,fileDataUrl:dataUrl,originalName:f.name});if(r.ocrAvailable)alert('Acta procesada. Se usarán únicamente jugadores y staff de Marbella; revisa los datos antes de aplicarlos.');else alert('Acta guardada. La extracción automática no está disponible: '+(r.ocrReason||'servicio OCR no disponible')+'. El PDF queda almacenado de forma privada.');await renderMatchPlanning(eventId);}catch(err){showMessage(err.message,'error');}};
+    const rf=document.getElementById('report-form');if(rf)rf.onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('report-file').files?.[0];if(!f)return;try{showMessage('Subiendo y procesando acta…');const dataUrl=await fileToDataUrl(f);const {data:r}=await call('uploadMatchReport',{eventId,fileDataUrl:dataUrl,originalName:f.name});if(r.ocrAvailable)alert('Acta procesada. Se usarán únicamente jugadores y staff de Marbella; revisa los datos antes de aplicarlos.');else alert('Acta guardada. La extracción automática no está disponible. '+(r.ocrMessage||r.ocrReason||'Servicio OCR no disponible')+' ['+(r.ocrReason||'OCR_ERROR')+']. El PDF queda almacenado de forma privada.');await renderMatchPlanning(eventId);}catch(err){showMessage(err.message,'error');}};
     document.querySelectorAll('[data-report-view]').forEach(b=>b.onclick=async()=>{try{const {data:f}=await call('getMatchReportFile',{reportId:b.dataset.reportView});const w=window.open();if(w)w.document.write(`<iframe src="${f.dataUrl}" style="border:0;width:100%;height:100vh"></iframe>`);}catch(err){showMessage(err.message,'error');}});document.querySelectorAll('[data-report-apply]').forEach(b=>b.onclick=()=>reviewAndApplyReport(b.dataset.reportApply,eventId));
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar el partido</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
 }

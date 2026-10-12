@@ -101,13 +101,21 @@ function shell(content, active = 'home') {
       <div class="brand">${brandMarkup()}</div>
       ${currentUser ? `<div class="session"><span>${escapeHtml(currentUser.email)}</span><button class="button ghost" id="logout">Salir</button></div>` : ''}
     </header>
-    ${currentUser ? `<nav class="nav"><button class="nav-link ${active === 'home' ? 'active' : ''}" data-nav="home">Inicio</button><button class="nav-link ${active === 'structure' ? 'active' : ''}" data-nav="structure">Estructura</button><button class="nav-link ${active === 'settings' ? 'active' : ''}" data-nav="settings">Configuración</button></nav>` : ''}
+    ${currentUser ? `<nav class="nav"><button class="nav-link ${active === 'home' ? 'active' : ''}" data-nav="home">Inicio</button><button class="nav-link ${active === 'structure' ? 'active' : ''}" data-nav="structure">Estructura</button><button class="nav-link ${active === 'families' ? 'active' : ''}" data-nav="families">Tutores</button><button class="nav-link ${active === 'documents' ? 'active' : ''}" data-nav="documents">Documentos</button><button class="nav-link ${active === 'users' ? 'active' : ''}" data-nav="users">Usuarios</button><button class="nav-link ${active === 'settings' ? 'active' : ''}" data-nav="settings">Configuración</button></nav>` : ''}
     <main class="container">${content}</main>
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
   if (logoutButton) logoutButton.onclick = logout;
   document.querySelectorAll('[data-nav]').forEach(button => {
-    button.onclick = () => button.dataset.nav === 'settings' ? renderClubSettings() : button.dataset.nav === 'structure' ? renderStructure() : renderDashboard();
+    button.onclick = () => {
+      const nav=button.dataset.nav;
+      if(nav==='settings') return renderClubSettings();
+      if(nav==='structure') return renderStructure();
+      if(nav==='families') return renderFamilies();
+      if(nav==='documents') return renderDocuments();
+      if(nav==='users') return renderUsers();
+      return renderDashboard();
+    };
   });
 }
 
@@ -189,6 +197,9 @@ async function renderDashboard() {
     </section>
     <section class="quick-grid">
       <article class="quick-card"><span class="eyebrow">Gestión</span><h2>Estructura deportiva</h2><p>Personas, cargos, divisiones, equipos y asignaciones múltiples.</p><button class="button primary" id="go-structure">Abrir estructura</button></article>
+      <article class="quick-card"><span class="eyebrow">Familias</span><h2>Tutores y menores</h2><p>Relacioná menores con tutores autorizados para gestionar documentación.</p><button class="button secondary" id="go-families">Abrir tutores</button></article>
+      <article class="quick-card"><span class="eyebrow">Archivos</span><h2>Documentación</h2><p>Subida privada, versiones, revisión y vencimientos.</p><button class="button secondary" id="go-documents">Abrir documentos</button></article>
+      <article class="quick-card"><span class="eyebrow">Acceso</span><h2>Usuarios</h2><p>Creación de cuentas, roles, bloqueo y reset de contraseña.</p><button class="button secondary" id="go-users">Abrir usuarios</button></article>
       <article class="quick-card"><span class="eyebrow">Club</span><h2>Configuración</h2><p>Nombre, logo, colores y temporada activa.</p><button class="button secondary" id="go-settings">Abrir configuración</button></article>
     </section>
     <section class="panel">
@@ -197,6 +208,9 @@ async function renderDashboard() {
     </section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
   document.getElementById('go-structure').onclick = () => renderStructure();
+  document.getElementById('go-families').onclick = renderFamilies;
+  document.getElementById('go-documents').onclick = renderDocuments;
+  document.getElementById('go-users').onclick = renderUsers;
   document.getElementById('go-settings').onclick = renderClubSettings;
   document.getElementById('refresh-status').onclick = loadStatus;
   await loadStatus();
@@ -207,7 +221,7 @@ async function loadStatus() {
   if (button) button.disabled = true;
   try {
     const { data } = await call('status');
-    currentUser = { email: data.actor.email, role: data.actor.role };
+    currentUser = { email: data.actor.email, role: data.actor.role, personId: data.actor.personId || '' };
     const grid = document.getElementById('status-grid');
     if (grid) grid.innerHTML = [
       statusCard('Autenticación', data.authenticated, `${data.actor.email} · ${data.actor.role}`),
@@ -634,7 +648,7 @@ async function start() {
   currentUser = { email: 'Sesión guardada', role: '' };
   try {
     const { data } = await call('status');
-    currentUser = { email: data.actor.email, role: data.actor.role };
+    currentUser = { email: data.actor.email, role: data.actor.role, personId: data.actor.personId || '' };
     await loadClubConfig();
     await renderDashboard();
   } catch (error) {
@@ -645,3 +659,92 @@ async function start() {
 }
 
 start();
+
+function personNameById(items,id){const p=(items||[]).find(x=>x.personId===id);return p?p.displayName:id||'—';}
+
+async function renderFamilies(){
+  if(!['ADMIN','MANAGER'].includes(currentUser?.role)) return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>Solo administradores y managers pueden gestionar tutores.</p></section>','families');
+  try{
+    const {data}=await call('getFamilyData');
+    const people=data.persons||[], rels=data.relations||[];
+    const rows=rels.map(r=>`<tr><td>${escapeHtml(personNameById(people,r.childPersonId))}</td><td>${escapeHtml(personNameById(people,r.guardianPersonId))}</td><td>${escapeHtml(r.relationshipType)}</td><td>${statusBadge(r.status)}</td><td>${r.canManageDocuments==='TRUE'?'Sí':'No'}</td></tr>`).join('');
+    shell(`<section class="hero compact"><span class="eyebrow">Familias</span><h1>Tutores y menores</h1><p>Las relaciones autorizan la gestión documental del menor sin duplicar personas.</p></section>
+    <section class="panel"><div class="panel-heading"><div><h2>Relaciones</h2></div></div>${rels.length?`<div class="table-wrap"><table><thead><tr><th>Menor</th><th>Tutor</th><th>Relación</th><th>Estado</th><th>Docs</th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay relaciones cargadas.')}
+    <form id="guardian-form" class="form-grid two" style="margin-top:1rem">
+      <label>Menor<select id="guardian-child" required>${optionList(people,'personId',p=>p.displayName,'',false)}</select></label>
+      <label>Tutor<select id="guardian-adult" required>${optionList(people,'personId',p=>p.displayName,'',false)}</select></label>
+      <label>Tipo de relación<input id="guardian-type" value="PADRE/MADRE" maxlength="50"></label>
+      <label>Estado<select id="guardian-status"><option>ACTIVE</option><option>INACTIVE</option><option>REVOKED</option></select></label>
+      <label class="check-row"><input id="guardian-docs" type="checkbox" checked> Puede gestionar documentación</label>
+      <div><button class="button primary" type="submit">Guardar relación</button></div>
+    </form><div id="message" class="message"></div></section>`,'families');
+    document.getElementById('guardian-form').onsubmit=async e=>{
+      e.preventDefault(); try{
+        await call('saveGuardianRelation',{childPersonId:val('guardian-child'),guardianPersonId:val('guardian-adult'),relationshipType:val('guardian-type'),status:val('guardian-status'),canManageDocuments:document.getElementById('guardian-docs').checked});
+        await renderFamilies();
+      }catch(err){showMessage(err.message,'error');}
+    };
+  }catch(err){shell(`<section class="panel narrow"><h1>Error</h1><p>${escapeHtml(err.message)}</p></section>`,'families');}
+}
+
+async function renderDocuments(){
+  try{
+    const {data}=await call('getDocumentsData');
+    const people=data.persons||[], types=data.documentTypes||[], docs=data.documents||[];
+    const typeMap={};types.forEach(t=>typeMap[t.documentTypeId]=t.name);
+    const rows=docs.slice().reverse().map(d=>`<tr>
+      <td><strong>${escapeHtml(personNameById(people,d.personId))}</strong><small>${escapeHtml(typeMap[d.documentTypeId]||d.documentTypeId)} · v${escapeHtml(d.versionNo)}</small></td>
+      <td>${escapeHtml(d.originalName)}</td><td>${statusBadge(d.status)}</td><td>${escapeHtml(d.expiryDate||'—')}</td>
+      <td><button class="button mini secondary" data-view-doc="${escapeHtml(d.documentId)}">Ver</button>${data.canReview&&d.status==='PENDING'?` <button class="button mini primary" data-approve-doc="${escapeHtml(d.documentId)}">Aprobar</button> <button class="button mini secondary" data-reject-doc="${escapeHtml(d.documentId)}">Rechazar</button>`:''}</td>
+    </tr>`).join('');
+    shell(`<section class="hero compact"><span class="eyebrow">Documentación</span><h1>Archivos privados</h1><p>Los archivos se guardan en Drive privado y Sheets conserva únicamente metadatos.</p></section>
+    <section class="panel"><div class="panel-heading"><div><h2>Documentos accesibles</h2></div></div>${docs.length?`<div class="table-wrap"><table><thead><tr><th>Titular</th><th>Archivo</th><th>Estado</th><th>Vence</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay documentos accesibles.')}
+    ${people.length&&types.length?`<form id="doc-form" class="form-grid two" style="margin-top:1rem">
+      <label>Titular<select id="doc-person" required>${optionList(people,'personId',p=>p.displayName,'',false)}</select></label>
+      <label>Tipo<select id="doc-type" required>${optionList(types,'documentTypeId',t=>t.name,'',false)}</select></label>
+      <label>Fecha emisión<input id="doc-issue" type="date"></label><label>Fecha vencimiento<input id="doc-expiry" type="date"></label>
+      <label class="full">Archivo<input id="doc-file" type="file" accept=".pdf,image/png,image/jpeg,image/webp" required></label>
+      <div><button class="button primary" type="submit">Subir documento</button></div>
+    </form>`:''}
+    ${currentUser?.role==='ADMIN'?`<div class="section-divider"></div><form id="doctype-form" class="form-grid two"><label>Nuevo tipo<input id="doctype-name" required maxlength="120"></label><label>Descripción<input id="doctype-description" maxlength="500"></label><label class="check-row"><input id="doctype-expiry" type="checkbox"> Puede tener vencimiento</label><div><button class="button secondary" type="submit">Crear tipo</button></div></form>`:''}
+    <div id="message" class="message"></div></section>`,'documents');
+
+    const form=document.getElementById('doc-form');
+    if(form) form.onsubmit=async e=>{
+      e.preventDefault(); const f=document.getElementById('doc-file').files?.[0]; if(!f)return;
+      if(f.size>4500000)return showMessage('El archivo supera 4,5 MB.','error');
+      try{showMessage('Subiendo documento…'); const dataUrl=await fileToDataUrl(f);
+        await call('uploadDocument',{personId:val('doc-person'),documentTypeId:val('doc-type'),issueDate:val('doc-issue'),expiryDate:val('doc-expiry'),originalName:f.name,fileDataUrl:dataUrl});
+        await renderDocuments();
+      }catch(err){showMessage(err.message,'error');}
+    };
+    const tf=document.getElementById('doctype-form');
+    if(tf) tf.onsubmit=async e=>{e.preventDefault();try{await call('saveDocumentType',{name:val('doctype-name'),description:val('doctype-description'),hasExpiry:document.getElementById('doctype-expiry').checked,status:'ACTIVE'});await renderDocuments();}catch(err){showMessage(err.message,'error');}};
+    document.querySelectorAll('[data-view-doc]').forEach(b=>b.onclick=async()=>{try{showMessage('Abriendo documento…');const {data:file}=await call('getDocumentFile',{documentId:b.dataset.viewDoc});const w=window.open();if(w){w.document.write(`<iframe src="${file.dataUrl}" style="border:0;width:100%;height:100vh"></iframe>`);}else{showMessage('El navegador bloqueó la ventana emergente.','error');}}catch(err){showMessage(err.message,'error');}});
+    document.querySelectorAll('[data-approve-doc]').forEach(b=>b.onclick=()=>reviewDocUi(b.dataset.approveDoc,'APPROVED'));
+    document.querySelectorAll('[data-reject-doc]').forEach(b=>b.onclick=()=>reviewDocUi(b.dataset.rejectDoc,'REJECTED'));
+  }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar documentación</h1><p>${escapeHtml(err.message)}</p></section>`,'documents');}
+}
+async function reviewDocUi(id,status){try{const notes=status==='REJECTED'?(prompt('Motivo del rechazo:')||''):'';await call('reviewDocument',{documentId:id,status,reviewNotes:notes});await renderDocuments();}catch(err){showMessage(err.message,'error');}}
+
+async function renderUsers(){
+  if(!['ADMIN','MANAGER'].includes(currentUser?.role)) return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>No tienes permisos para administrar usuarios.</p></section>','users');
+  try{
+    const {data}=await call('getUsersData'); const people=data.persons||[], users=data.users||[], roles=data.securityRoles||[];
+    const rows=users.map(u=>`<tr><td><strong>${escapeHtml(u.email)}</strong><small>${escapeHtml(personNameById(people,u.personId))}</small></td><td>${escapeHtml(u.securityRole)}</td><td>${statusBadge(u.status)}</td><td>${escapeHtml(u.lastLoginAt||'Nunca')}</td><td><button class="button mini secondary" data-reset-user="${u.userId}">Reset</button><button class="button mini secondary" data-toggle-user="${u.userId}" data-status="${u.status}" data-role="${u.securityRole}">${u.status==='ACTIVE'?'Desactivar':'Activar'}</button></td></tr>`).join('');
+    shell(`<section class="hero compact"><span class="eyebrow">Accesos</span><h1>Usuarios y permisos</h1><p>La cuenta de acceso se mantiene separada de la ficha de persona.</p></section>
+    <section class="panel"><div class="panel-heading"><div><h2>Cuentas</h2></div></div>${users.length?`<div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay usuarios disponibles.')}
+    <form id="user-form" class="form-grid two" style="margin-top:1rem">
+      <label>Persona<select id="user-person" required>${optionList(people,'personId',p=>p.displayName,'',false)}</select></label>
+      <label>Correo<input id="user-email" type="email" required></label>
+      <label>Rol<select id="user-role">${roles.map(r=>`<option value="${r}">${r}</option>`).join('')}</select></label>
+      <label>Contraseña temporal<input id="user-password" type="password" minlength="10" required></label>
+      <div><button class="button primary" type="submit">Crear usuario</button></div>
+    </form><div id="message" class="message"></div></section>`,'users');
+    document.getElementById('user-person').onchange=()=>{const p=people.find(x=>x.personId===val('user-person'));if(p&&p.email)document.getElementById('user-email').value=p.email;};
+    document.getElementById('user-form').onsubmit=async e=>{e.preventDefault();try{await call('createUser',{personId:val('user-person'),email:val('user-email'),securityRole:val('user-role'),temporaryPassword:val('user-password')});await renderUsers();}catch(err){showMessage(err.message,'error');}};
+    document.querySelectorAll('[data-reset-user]').forEach(b=>b.onclick=async()=>{const pwd=prompt('Nueva contraseña temporal (mínimo 10 caracteres):');if(!pwd)return;try{await call('resetUserPassword',{userId:b.dataset.resetUser,temporaryPassword:pwd});showMessage('Contraseña restablecida.','success');}catch(err){showMessage(err.message,'error');}});
+    document.querySelectorAll('[data-toggle-user]').forEach(b=>b.onclick=async()=>{try{await call('updateUserAccess',{userId:b.dataset.toggleUser,status:b.dataset.status==='ACTIVE'?'DISABLED':'ACTIVE',securityRole:b.dataset.role});await renderUsers();}catch(err){showMessage(err.message,'error');}});
+  }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar usuarios</h1><p>${escapeHtml(err.message)}</p></section>`,'users');}
+}
+

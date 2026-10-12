@@ -154,3 +154,5 @@ td small { margin-top: .2rem; color: var(--muted); }
 }
 
 @media (min-width:761px){.agenda-list{display:block}}
+
+.status-cancelled{opacity:.6;text-decoration:line-through}.status-postponed{border-style:dashed!important}.event-actions{flex-wrap:wrap}.danger-text{color:#a32626!important}

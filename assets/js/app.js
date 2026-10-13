@@ -433,6 +433,10 @@ async function renderClubSettings() {
           <label>Fin<input id="season-end" type="date" value="${escapeHtml(season.endDate || '')}"></label>
         </div>
       </section>
+      <section class="panel settings-main" id="season-manager-panel">
+        <div class="section-heading"><h2>Temporadas</h2><p>La estructura deportiva, equipos, asignaciones, calendario y estadísticas se separan por temporada. Personas, cargos y usuarios siguen siendo registros únicos.</p></div>
+        <div id="season-manager-content"><p>Cargando temporadas…</p></div>
+      </section>
       <aside class="settings-side">
         <section class="panel">
           <div class="section-heading"><h2>Logo</h2><p>PNG, JPG o WebP. Máximo 1,5 MB.</p></div>
@@ -453,6 +457,16 @@ async function renderClubSettings() {
       </aside>
       <div class="settings-actions"><div id="message" class="message" aria-live="polite"></div><button class="button primary" type="submit">Guardar configuración</button></div>
     </form>`, 'settings');
+
+  try {
+    const seasonResp=await call('getSeasonsData');
+    const sd=seasonResp.data||{}, list=sd.seasons||[];
+    const rows=list.map(x=>`<tr><td><strong>${escapeHtml(x.name)}</strong><small>${escapeHtml(x.startDate||'')} → ${escapeHtml(x.endDate||'')}</small></td><td>${x.seasonId===sd.activeSeasonId?'<span class="badge active">Activa</span>':statusBadge(x.status)}</td><td>${x.divisionCount||0} div · ${x.teamCount||0} equipos · ${x.assignmentCount||0} asignaciones · ${x.eventCount||0} eventos</td><td>${x.seasonId===sd.activeSeasonId?'':`<button class="button mini secondary" data-activate-season="${escapeHtml(x.seasonId)}">Activar</button>`}</td></tr>`).join('');
+    const host=document.getElementById('season-manager-content');
+    host.innerHTML=`${rows?`<div class="table-wrap"><table><thead><tr><th>Temporada</th><th>Estado</th><th>Datos deportivos</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty-state">No hay temporadas todavía.</div>'}<div class="section-divider"></div><form id="new-season-form" class="form-grid three"><label>Nombre<input id="new-season-name" placeholder="2027/2028" required></label><label>Inicio<input id="new-season-start" type="date"></label><label>Fin<input id="new-season-end" type="date"></label><label class="check-row"><input id="new-season-activate" type="checkbox" checked> Activar al crear</label><div><button class="button primary" type="submit">Crear temporada</button></div></form><div id="season-message" class="message"></div>`;
+    document.querySelectorAll('[data-activate-season]').forEach(b=>b.onclick=async()=>{try{await call('setActiveSeason',{seasonId:b.dataset.activateSeason});clubConfig=null;showToast_('Temporada activa actualizada.');await renderClubSettings();}catch(err){showMessage(err.message,'error','season-message');}});
+    document.getElementById('new-season-form').onsubmit=async ev=>{ev.preventDefault();try{await call('saveSeason',{name:val('new-season-name'),startDate:val('new-season-start'),endDate:val('new-season-end'),status:'PLANNED',activate:document.getElementById('new-season-activate').checked});clubConfig=null;showToast_('Temporada creada.');await renderClubSettings();}catch(err){showMessage(err.message,'error','season-message');}};
+  } catch(err) { const host=document.getElementById('season-manager-content'); if(host) host.innerHTML=`<div class="message error">${escapeHtml(err.message)}</div>`; }
 
   wireColorPair('primary');
   wireColorPair('secondary');
@@ -573,7 +587,7 @@ async function renderStructure(section = structureSection) {
     <section class="hero compact">
       <span class="eyebrow">Estructura deportiva</span>
       <h1>Personas y organización</h1>
-      <p>Una persona puede tener varios cargos y participar en varias divisiones sin duplicarse. Los equipos A/B se gestionan dentro de cada división.</p>
+      <p>La vista muestra la temporada activa. Personas, cargos y usuarios son únicos; divisiones, equipos, asignaciones, calendario y estadísticas se gestionan por temporada.</p>
     </section>
     ${structureTabs()}
     ${content}
@@ -618,7 +632,7 @@ function renderDivisionsSection() {
     const teamHtml=own.length?own.map(t=>`<span class="badge active">${escapeHtml(t.name)}</span> <button class="button mini secondary" data-edit-team="${escapeHtml(t.teamId)}">Editar</button>`).join('<br>'):'<span class="muted">Sin equipos creados</span>';
     return `<tr><td><strong><span class="division-color-dot" style="--division-color:${escapeHtml(item.color||'#2563EB')}"></span>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.code || '')}</small></td><td>${teamHtml}<div style="margin-top:.45rem"><button class="button mini primary" data-new-team-division="${escapeHtml(item.divisionId)}">+ Equipo</button></div></td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-division="${escapeHtml(item.divisionId)}">Editar división</button></td></tr>`;
   }).join('');
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones y equipos</h2><p>Los equipos A/B pertenecen a la división y se crean desde aquí. Las personas nunca se asignan permanentemente a A/B.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipos</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones para la temporada activa.')}<div id="editor-host"></div></section>`;
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones y equipos</h2><p>Equipos y reglas de duración pertenecen a la temporada activa. A/B se crea dentro de la división de esa temporada.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipos</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones para la temporada activa.')}<div id="editor-host"></div></section>`;
 }
 
 function renderTeamsSection() {
@@ -1135,6 +1149,7 @@ function matchHeaderHtml_(e,meta,opts={}){
   </section>`;
 }
 function openMatchFormatDurationEditor_(e){
+  if(!document.getElementById('editor-host')){const h=document.createElement('div');h.id='editor-host';(document.querySelector('.match-detail-panel')||document.getElementById('app')).appendChild(h);}
   const div=(calendarData?.divisions||[]).find(x=>x.divisionId===e.divisionId)||{};
   const divKey=`${div.code||''} ${div.name||''}`.toUpperCase();
   const isM14=/\bM14\b/.test(divKey);

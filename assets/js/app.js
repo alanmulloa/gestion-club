@@ -5,6 +5,7 @@ let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
 let structureData = null;
+let statisticsData = null;
 let structureSection = 'people';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
@@ -108,10 +109,10 @@ function roleDisplayName(role) {
 
 function navigationForRole(role) {
   const all = [
-    ['home','Inicio'],['structure','Estructura'],['families','Tutores'],['documents','Documentos'],['calendar','Calendario'],['users','Usuarios'],['settings','Configuración']
+    ['home','Inicio'],['structure','Estructura'],['families','Tutores'],['documents','Documentos'],['calendar','Calendario'],['statistics','Estadísticas'],['users','Usuarios'],['settings','Configuración']
   ];
-  if (role === 'MANAGER') return all.filter(x => ['home','structure','documents','calendar','users'].includes(x[0]));
-  if (role === 'COACH') return all.filter(x => ['home','structure','documents','calendar'].includes(x[0]));
+  if (role === 'MANAGER') return all.filter(x => ['home','structure','documents','calendar','statistics','users'].includes(x[0]));
+  if (role === 'COACH') return all.filter(x => ['home','structure','documents','calendar','statistics'].includes(x[0]));
   if (role === 'REFEREE') return all.filter(x => ['home','documents','calendar'].includes(x[0]));
   if (role === 'PLAYER') return all.filter(x => ['home','documents','calendar'].includes(x[0]));
   if (role === 'TUTOR') return all.filter(x => ['home','families','documents','calendar'].includes(x[0]));
@@ -122,7 +123,7 @@ function navigationForRole(role) {
 function navMarkup(active) {
   if (!currentUser) return '';
   return navigationForRole(currentUser.role).map(([key,label]) =>
-    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',users:'◎',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
+    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',statistics:'▥',users:'◎',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
   ).join('');
 }
 
@@ -131,6 +132,7 @@ function dashboardCardsForRole() {
   const cards=[];
   if (['ADMIN','MANAGER','COACH'].includes(role)) cards.push(['Actividad','Calendario deportivo','Entrenamientos, partidos, disponibilidad y convocatorias.','go-calendar','primary']);
   if (['ADMIN','MANAGER','COACH'].includes(role)) cards.push(['Gestión','Estructura deportiva','Personas, cargos, divisiones, equipos y asignaciones.','go-structure','secondary']);
+  if (['ADMIN','MANAGER','COACH'].includes(role)) cards.push(['Rendimiento','Estadísticas','Minutos, convocatorias, puntos, disciplina y resultados.','go-statistics','secondary']);
   if (['ADMIN','MANAGER','COACH','REFEREE','PLAYER','TUTOR','COLLABORATOR'].includes(role)) cards.push(['Archivos','Documentación','Consultá y gestioná la documentación a la que tenés acceso.','go-documents','secondary']);
   if (['ADMIN','MANAGER'].includes(role)) cards.push(['Acceso','Usuarios','Creación de cuentas, roles y accesos.','go-users','secondary']);
   if (['ADMIN','MANAGER','TUTOR'].includes(role)) cards.push(['Familias','Tutores y menores','Relaciones entre menores y tutores autorizados.','go-families','secondary']);
@@ -161,6 +163,7 @@ function shell(content, active = 'home') {
       if(nav==='documents') return renderDocuments();
       if(nav==='users') return renderUsers();
       if(nav==='calendar') return renderCalendar();
+      if(nav==='statistics') return renderStatistics();
       return renderDashboard();
     };
   });
@@ -254,6 +257,7 @@ async function renderDashboard() {
   wire('go-documents',renderDocuments);
   wire('go-users',renderUsers);
   wire('go-calendar',renderCalendar);
+  wire('go-statistics',renderStatistics);
   wire('go-settings',renderClubSettings);
   document.getElementById('refresh-status').onclick = loadStatus;
   await loadStatus();
@@ -887,6 +891,37 @@ function renderAgenda(events){
   }).join('')}</div>`;
 }
 
+
+
+function statsNumber_(value){return Number(value||0).toLocaleString('es-ES');}
+function statisticsResultLabel_(m){const pf=Number(m.resultFor||0),pa=Number(m.resultAgainst||0);return pf>pa?'Victoria':pf<pa?'Derrota':'Empate';}
+async function renderStatistics(filters={}){
+  try{
+    const {data}=await call('getStatisticsData',filters);statisticsData=data;
+    const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x]));
+    const teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x]));
+    const f=data.filters||{},summary=data.summary||{};
+    const seasonOptions=`<option value="">Todas</option>`+(data.seasons||[]).map(x=>`<option value="${escapeHtml(x.seasonId)}" ${x.seasonId===f.seasonId?'selected':''}>${escapeHtml(x.name)}</option>`).join('');
+    const divisionOptions=`<option value="">Todas</option>`+(data.divisions||[]).filter(x=>x.status==='ACTIVE'||x.divisionId===f.divisionId).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${x.divisionId===f.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join('');
+    const scopedTeams=(data.teams||[]).filter(x=>!f.divisionId||x.divisionId===f.divisionId);
+    const teamOptions=`<option value="">Todos</option>`+scopedTeams.map(x=>`<option value="${escapeHtml(x.teamId)}" ${x.teamId===f.teamId?'selected':''}>${escapeHtml(x.name)}</option>`).join('');
+    const playerRows=(data.players||[]).map((p,i)=>`<tr><td><span class="rank-number">${i+1}</span></td><td><strong>${escapeHtml(p.playerName)}</strong>${p.licenseNumber?`<small>Lic. ${escapeHtml(p.licenseNumber)}</small>`:''}</td><td>${p.matches}</td><td>${p.starts}</td><td>${p.bench}</td><td>${statsNumber_(p.minutes)}</td><td>${p.points}</td><td>${p.tries}</td><td>${p.conversions}</td><td>${p.yellowCards}</td><td>${p.redCards}</td><td>${p.captaincies}</td></tr>`).join('');
+    const matchRows=(data.recentMatches||[]).map(m=>`<tr data-stats-event="${escapeHtml(m.eventId)}" class="clickable-row"><td>${escapeHtml(m.eventDate)}</td><td>${escapeHtml((divMap[m.divisionId]||{}).name||'—')}</td><td>${escapeHtml((teamMap[m.teamId]||{}).name||'—')}</td><td>${escapeHtml(m.opponent||'—')}</td><td><strong>${escapeHtml(m.resultFor||'0')} - ${escapeHtml(m.resultAgainst||'0')}</strong></td><td>${statisticsResultLabel_(m)}</td></tr>`).join('');
+    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento</span><h1>Estadísticas</h1><p>Datos consolidados desde partidos y actas oficiales.</p></section>
+      <section class="panel stats-filter-panel"><div class="form-grid three"><label>Temporada<select id="stats-season">${seasonOptions}</select></label><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label></div></section>
+      <section class="stats-summary-grid">
+        <article class="metric-card"><span>Partidos</span><strong>${statsNumber_(summary.matches)}</strong><small>${summary.wins||0} V · ${summary.draws||0} E · ${summary.losses||0} D</small></article>
+        <article class="metric-card"><span>Puntos</span><strong>${summary.pointsFor||0} : ${summary.pointsAgainst||0}</strong><small>Diferencia ${summary.difference>0?'+':''}${summary.difference||0}</small></article>
+        <article class="metric-card"><span>Jugadores</span><strong>${statsNumber_(summary.players)}</strong><small>${statsNumber_(summary.totalMinutes)} min acumulados</small></article>
+        <article class="metric-card"><span>Disciplina</span><strong>${summary.yellowCards||0} 🟨 · ${summary.redCards||0} 🟥</strong><small>Actas consolidadas</small></article>
+      </section>
+      <section class="panel"><div class="panel-heading"><div><h2>Estadísticas individuales</h2><p>Acumulado del filtro seleccionado.</p></div></div>${playerRows?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>#</th><th>Jugador</th><th>PJ</th><th>Tit.</th><th>Sup.</th><th>Min.</th><th>Pts.</th><th>Ens.</th><th>Transf.</th><th>🟨</th><th>🟥</th><th>Cap.</th></tr></thead><tbody>${playerRows}</tbody></table></div>`:emptyTable('Todavía no hay estadísticas oficiales para este filtro.')}</section>
+      <section class="panel"><div class="panel-heading"><div><h2>Partidos</h2><p>Últimos partidos incluidos en el cálculo.</p></div></div>${matchRows?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>División</th><th>Equipo</th><th>Rival</th><th>Resultado</th><th></th></tr></thead><tbody>${matchRows}</tbody></table></div>`:emptyTable('No hay partidos finalizados en este filtro.')}</section>`,'statistics');
+    const reload=()=>renderStatistics({seasonId:val('stats-season'),divisionId:val('stats-division'),teamId:val('stats-team')});
+    document.getElementById('stats-season').onchange=reload;document.getElementById('stats-division').onchange=()=>renderStatistics({seasonId:val('stats-season'),divisionId:val('stats-division'),teamId:''});document.getElementById('stats-team').onchange=reload;
+    document.querySelectorAll('[data-stats-event]').forEach(row=>row.onclick=()=>renderEventDetail(row.dataset.statsEvent));
+  }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar las estadísticas</h1><p>${escapeHtml(err.message)}</p></section>`,'statistics');}
+}
 
 async function renderCalendar(){
   try{const {data}=await call('getCalendarData',{});calendarData=data;}

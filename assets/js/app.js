@@ -681,7 +681,12 @@ async function extractNativePdfText_(fileOrDataUrl){
       const lines=rows.map(row=>{
         row.items.sort((a,b)=>a.x-b.x);let line='',cursor=null;
         row.items.forEach(item=>{
-          if(cursor===null){line=item.str;cursor=item.x+item.w;return;}
+          if(cursor===null){
+            // Preserve absolute column position too. If a FAR row only contains the AWAY
+            // column (uneven substitute benches), starting the line at column zero loses
+            // which team it belongs to and can leak rival players into Marbella.
+            line=(item.x>300?' '.repeat(24):'')+item.str;cursor=item.x+item.w;return;
+          }
           const gap=Math.max(0,item.x-cursor);
           // Preserve column separation. Large gaps become multiple spaces so the FAR
           // parser can reliably distinguish HOME (left) from AWAY (right).

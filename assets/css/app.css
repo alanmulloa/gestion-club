@@ -268,11 +268,11 @@ td small { margin-top: .2rem; color: var(--muted); }
 /* 0.6.30 · competiciones y enlaces federativos */
 .official-link-bar{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.85rem 0 0}.official-link-bar:empty{display:none}.compact-links{gap:.35rem}.compact-links .button{min-height:34px;padding:.4rem .65rem;font-size:.8rem}.muted-text{color:var(--muted,#64736c);font-size:.86rem}.competition-source-card{padding:.8rem .95rem;margin:.75rem 0;border:1px solid var(--border,#dfe7e2);border-radius:12px;background:var(--surface-soft,#f7faf8)}@media(max-width:700px){.official-link-bar .button,.compact-links .button{flex:1 1 auto;text-align:center}}
 
-/* 0.6.32 · autorización guiada para sincronización FAR / MatchReady */
+/* 0.6.33 · autorización guiada para sincronización FAR / MatchReady */
 .form-action-bottom{display:flex;align-items:end}.form-action-bottom .button{width:100%}
 .advanced-box{padding:.85rem .95rem;border:1px solid var(--line);border-radius:.85rem;background:#fafcfb}.advanced-box summary{cursor:pointer;font-weight:800;color:var(--brand-dark)}.advanced-box[open] summary{margin-bottom:.9rem}
 .status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:.28rem .55rem;font-size:.72rem;font-weight:850;letter-spacing:.02em}.status-pill.success{color:#126438;background:#dcf4e5}.status-pill.warning{color:#805b00;background:#fff3cd}.status-pill.muted{color:#5e5b68;background:#ecebf0}
 .compact-links{margin-top:0}.muted-text{color:var(--muted)}
 
-/* 0.6.32 · autorización guiada FAR / MatchReady */
+/* 0.6.33 · autorización guiada FAR / MatchReady */
 .external-auth-warning{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;border-style:dashed}.external-auth-warning>div:first-child{flex:1 1 420px}.external-auth-warning .button-row{margin-top:0}

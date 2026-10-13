@@ -276,3 +276,12 @@ td small { margin-top: .2rem; color: var(--muted); }
 
 /* 0.6.33 · autorización guiada FAR / MatchReady */
 .external-auth-warning{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;border-style:dashed}.external-auth-warning>div:first-child{flex:1 1 420px}.external-auth-warning .button-row{margin-top:0}
+
+/* 0.6.37 · convocatoria por rol y planes de entrenamiento */
+.readonly-field{min-height:44px;display:flex;align-items:center;padding:.7rem .85rem;border:1px solid var(--line);border-radius:.75rem;background:#f7f8f5;font-weight:800;color:var(--ink)}
+.participant-role-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+.participant-role-group{border:1px solid var(--line);border-radius:1rem;padding:1rem;background:#fff}
+.participant-role-heading{display:grid;gap:.15rem;margin-bottom:.65rem}.participant-role-heading h3{margin:0}.participant-role-heading small{color:var(--muted)}
+.participant-role-list{display:grid;gap:.45rem}.participant-choice.role-fixed{grid-template-columns:auto minmax(0,1fr) auto;align-items:center}.participant-choice.role-fixed>span{display:grid;gap:.05rem}.participant-choice.role-fixed small{color:var(--muted);font-size:.74rem}
+.training-days-grid{display:grid;gap:.55rem}.training-day-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,.7fr) minmax(130px,.7fr);gap:.75rem;align-items:end;padding:.7rem .8rem;border:1px solid var(--line);border-radius:.8rem;background:#fafbf8}.training-day-row label{margin:0}
+@media(max-width:760px){.participant-role-groups{grid-template-columns:1fr}.training-day-row{grid-template-columns:1fr 1fr}.training-day-row .check-row{grid-column:1/-1}}

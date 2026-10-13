@@ -8,6 +8,110 @@ let structureData = null;
 let statisticsData = null;
 let structureSection = 'people';
 
+
+// 0.6.12 · estabilidad visual y bloqueo de acciones concurrentes.
+// Cada llamada al backend bloquea temporalmente la interfaz para evitar dobles clics,
+// navegaciones concurrentes y pantallas antiguas que reaparecen mientras otra petición
+// todavía está en curso. El popup se muestra con una pequeña demora para no parpadear.
+let uiBusySeq = 0;
+const uiBusyTasks = new Map();
+let uiBusyTimer = null;
+
+function busyMessageForAction_(action) {
+  const a = String(action || '');
+  if (a === 'login') return 'Validando cuenta…';
+  if (a === 'status') return 'Comprobando sistema…';
+  if (/previewLeagueCalendarImport/i.test(a)) return 'Analizando calendario…';
+  if (/importLeagueCalendar/i.test(a)) return 'Importando calendario…';
+  if (/uploadMatchReport/i.test(a)) return 'Subiendo y procesando acta…';
+  if (/reprocessMatchReport/i.test(a)) return 'Reprocesando acta…';
+  if (/applyMatchReport/i.test(a)) return 'Aplicando datos del acta…';
+  if (/getMatchReportFile/i.test(a)) return 'Cargando acta…';
+  if (/MatchReportPeople/i.test(a)) return 'Vinculando personas…';
+  if (/saveMatchLineup/i.test(a)) return 'Guardando equipo…';
+  if (/MatchAvailability/i.test(a)) return 'Guardando disponibilidad…';
+  if (/uploadDocument/i.test(a)) return 'Subiendo documento…';
+  if (/save|create|update|delete|cancel|postpone|reactivate|review|set/i.test(a)) return 'Guardando cambios…';
+  if (/get|list|status|statistics|calendar|structure|planning/i.test(a)) return 'Cargando…';
+  return 'Procesando…';
+}
+
+function ensureBusyOverlay_() {
+  let overlay = document.getElementById('ui-busy-overlay');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'ui-busy-overlay';
+  overlay.className = 'ui-busy-overlay';
+  overlay.setAttribute('role', 'status');
+  overlay.setAttribute('aria-live', 'polite');
+  overlay.setAttribute('aria-label', 'Operación en curso');
+  overlay.innerHTML = `<div class="ui-busy-card"><span class="ui-spinner" aria-hidden="true"></span><div><strong data-ui-busy-title>Procesando…</strong><small>No cierres esta pantalla.</small></div></div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function refreshBusyOverlay_() {
+  const overlay = ensureBusyOverlay_();
+  const latest = Array.from(uiBusyTasks.values()).pop();
+  const title = overlay.querySelector('[data-ui-busy-title]');
+  if (title) title.textContent = latest || 'Procesando…';
+  if (uiBusyTasks.size) {
+    overlay.classList.add('is-blocking');
+    document.documentElement.setAttribute('aria-busy', 'true');
+    if ('inert' in root) root.inert = true;
+    if (!overlay.classList.contains('is-visible') && !uiBusyTimer) {
+      uiBusyTimer = setTimeout(() => {
+        uiBusyTimer = null;
+        if (uiBusyTasks.size) overlay.classList.add('is-visible');
+      }, 160);
+    }
+  } else {
+    if (uiBusyTimer) clearTimeout(uiBusyTimer);
+    uiBusyTimer = null;
+    overlay.classList.remove('is-visible', 'is-blocking');
+    document.documentElement.removeAttribute('aria-busy');
+    if ('inert' in root) root.inert = false;
+  }
+}
+
+function beginUiBusy_(message) {
+  const token = ++uiBusySeq;
+  uiBusyTasks.set(token, message || 'Procesando…');
+  refreshBusyOverlay_();
+  return token;
+}
+
+function endUiBusy_(token) {
+  uiBusyTasks.delete(token);
+  refreshBusyOverlay_();
+}
+
+async function withUiBusy_(message, task) {
+  const token = beginUiBusy_(message);
+  try { return await task(); }
+  finally { endUiBusy_(token); }
+}
+
+function showToast_(message, kind = 'success', duration = 2600) {
+  let host = document.getElementById('ui-toast-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'ui-toast-host';
+    host.className = 'ui-toast-host';
+    host.setAttribute('aria-live', 'polite');
+    document.body.appendChild(host);
+  }
+  const toast = document.createElement('div');
+  toast.className = `ui-toast ${kind}`;
+  toast.textContent = message;
+  host.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 180);
+  }, duration);
+}
+
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 })[character]);
@@ -47,21 +151,26 @@ function serverApi(request) {
 }
 
 async function call(action, payload = {}, fixedRequestId = null) {
-  const response = await serverApi({
-    action,
-    payload,
-    sessionToken,
-    requestId: fixedRequestId || requestId(),
-    clientVersion: config.appVersion
-  });
-  if (!response?.ok) {
-    const error = new Error(response?.error?.message || 'La operación no pudo completarse.');
-    error.code = response?.error?.code || 'UNKNOWN_ERROR';
-    error.requestId = response?.requestId || '';
-    if (['AUTH_REQUIRED', 'INVALID_SESSION', 'SESSION_EXPIRED', 'ACCOUNT_DISABLED'].includes(error.code)) clearSession();
-    throw error;
+  const busyToken = beginUiBusy_(busyMessageForAction_(action));
+  try {
+    const response = await serverApi({
+      action,
+      payload,
+      sessionToken,
+      requestId: fixedRequestId || requestId(),
+      clientVersion: config.appVersion
+    });
+    if (!response?.ok) {
+      const error = new Error(response?.error?.message || 'La operación no pudo completarse.');
+      error.code = response?.error?.code || 'UNKNOWN_ERROR';
+      error.requestId = response?.requestId || '';
+      if (['AUTH_REQUIRED', 'INVALID_SESSION', 'SESSION_EXPIRED', 'ACCOUNT_DISABLED'].includes(error.code)) clearSession();
+      throw error;
+    }
+    return response;
+  } finally {
+    endUiBusy_(busyToken);
   }
-  return response;
 }
 
 
@@ -403,8 +512,8 @@ async function renderClubSettings() {
       const { data } = await call('saveClubConfig', payload);
       clubConfig = data;
       applyClubTheme(clubConfig);
-      showMessage('Configuración guardada correctamente.', 'success');
-      setTimeout(renderClubSettings, 550);
+      showToast_('Configuración guardada correctamente.');
+      await renderClubSettings();
     } catch (error) {
       showMessage(error.message, 'error');
       button.disabled = false;
@@ -607,9 +716,9 @@ async function submitEntity(event, action, payload) {
   showMessage('Guardando…', 'info', 'editor-message');
   try {
     await call(action, payload);
-    showMessage('Guardado correctamente.', 'success', 'editor-message');
+    showToast_('Guardado correctamente.');
     await loadStructureData();
-    setTimeout(() => renderStructure(structureSection), 300);
+    await renderStructure(structureSection);
   } catch (error) {
     showMessage(error.message, 'error', 'editor-message');
     button.disabled = false;
@@ -858,10 +967,13 @@ async function renderDocuments(){
     if(form) form.onsubmit=async e=>{
       e.preventDefault(); const f=document.getElementById('doc-file').files?.[0]; if(!f)return;
       if(f.size>4500000)return showMessage('El archivo supera 4,5 MB.','error');
+      const localBusy=beginUiBusy_('Leyendo documento…');
       try{showMessage('Subiendo documento…'); const dataUrl=await fileToDataUrl(f);
+        endUiBusy_(localBusy);
         await call('uploadDocument',{personId:val('doc-person'),documentTypeId:val('doc-type'),issueDate:val('doc-issue'),expiryDate:val('doc-expiry'),originalName:f.name,fileDataUrl:dataUrl});
+        showToast_('Documento subido.');
         await renderDocuments();
-      }catch(err){showMessage(err.message,'error');}
+      }catch(err){endUiBusy_(localBusy);showMessage(err.message,'error');}
     };
     const tf=document.getElementById('doctype-form');
     if(tf) tf.onsubmit=async e=>{e.preventDefault();try{await call('saveDocumentType',{name:val('doctype-name'),description:val('doctype-description'),hasExpiry:document.getElementById('doctype-expiry').checked,status:'ACTIVE'});await renderDocuments();}catch(err){showMessage(err.message,'error');}};
@@ -1088,7 +1200,7 @@ async function renderLeagueImport(){
   if(!calendarData){const r=await call('getCalendarData',{});calendarData=r.data;}const d=calendarData;
   shell(`<section class="hero compact"><span class="eyebrow">Competición</span><h1>Importar calendario de liga</h1><p>La división se detecta desde la categoría del XLSX y los equipos se filtran por esa división.</p></section><section class="panel"><form id="league-preview-form" class="form-grid two"><label>Archivo XLSX<input id="league-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label><div><button class="button primary" type="submit">Analizar archivo</button></div></form><div id="league-preview"></div><div class="button-row"><button class="button secondary" id="league-back">Volver</button></div><div id="message" class="message"></div></section>`,'calendar');
   document.getElementById('league-back').onclick=renderCalendar;
-  document.getElementById('league-preview-form').onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('league-file').files?.[0];if(!f)return;try{showMessage('Analizando calendario…');const dataUrl=await fileToDataUrl(f);const {data}=await call('previewLeagueCalendarImport',{fileDataUrl:dataUrl,fileName:f.name});leagueImportState={previewId:data.previewId,fileName:f.name,preview:data};const rows=data.fixtures.map(x=>`<tr><td>${escapeHtml(x.roundName)}</td><td>${escapeHtml(x.eventDate)} ${escapeHtml(x.startTime||'')}</td><td>${escapeHtml(x.homeTeam)}</td><td>${escapeHtml(x.resultHome||'—')} - ${escapeHtml(x.resultAway||'—')}</td><td>${escapeHtml(x.awayTeam)}</td><td>${escapeHtml(x.refereeName||'—')}</td></tr>`).join('');
+  document.getElementById('league-preview-form').onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('league-file').files?.[0];if(!f)return;const localBusy=beginUiBusy_('Leyendo calendario…');try{showMessage('Analizando calendario…');const dataUrl=await fileToDataUrl(f);endUiBusy_(localBusy);const {data}=await call('previewLeagueCalendarImport',{fileDataUrl:dataUrl,fileName:f.name});leagueImportState={previewId:data.previewId,fileName:f.name,preview:data};const rows=data.fixtures.map(x=>`<tr><td>${escapeHtml(x.roundName)}</td><td>${escapeHtml(x.eventDate)} ${escapeHtml(x.startTime||'')}</td><td>${escapeHtml(x.homeTeam)}</td><td>${escapeHtml(x.resultHome||'—')} - ${escapeHtml(x.resultAway||'—')}</td><td>${escapeHtml(x.awayTeam)}</td><td>${escapeHtml(x.refereeName||'—')}</td></tr>`).join('');
     const clubOptions=`<option value="">— Seleccionar nuestro club —</option>`+data.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===data.suggestedClubCalendarName?'selected':''}>${escapeHtml(t)}</option>`).join('');
     document.getElementById('league-preview').innerHTML=`<div class="section-divider"></div><div class="section-heading"><h2>${escapeHtml(data.competition||'Competición')}</h2><p>${escapeHtml(data.category||'')} · ${data.fixtureCount} partidos detectados.</p></div><div class="form-grid three"><label>Nuestro equipo detectado<select id="league-club-name">${clubOptions}</select></label><label>División detectada<select id="league-division"><option value="">— Seleccionar división —</option>${optionList(d.divisions,'divisionId',x=>x.name,data.suggestedDivisionId||'',false)}</select></label><label>Equipo<select id="league-team"></select></label></div><div class="table-wrap compact-table"><table><thead><tr><th>Jornada</th><th>Fecha</th><th>Local</th><th>Res.</th><th>Visitante</th><th>Árbitro</th></tr></thead><tbody>${rows}</tbody></table></div><button class="button primary" id="league-import-confirm">Importar partidos del club</button>`;
     const divSel=document.getElementById('league-division'); if(data.suggestedDivisionId)divSel.value=data.suggestedDivisionId;
@@ -1098,7 +1210,7 @@ async function renderLeagueImport(){
     const detectedClub=data.suggestedClubCalendarName||'sin coincidencia automática';
     const marker=data.detectedDivisionMarker||'sin categoría reconocida';
     const rests=restRoundsForPreview_(data,data.suggestedClubCalendarName); showMessage(`Archivo analizado. Club: ${detectedClub}. Categoría: ${marker}.${detectedDivision?' División: '+detectedDivision+'.':' Confirma la división.'}${rests.length?' Descansos detectados: '+rests.length+'.':''}`,'success');
-  }catch(err){showMessage(err.message+(err.requestId?` · Solicitud ${err.requestId}`:''),'error');}};
+  }catch(err){endUiBusy_(localBusy);showMessage(err.message+(err.requestId?` · Solicitud ${err.requestId}`:''),'error');}};
 }
 function leagueConflictText_(c){
   const current=c.current||{},official=c.official||{};
@@ -1145,7 +1257,7 @@ function officialMatchSummaryHtml_(data,{compact=false}={}){
 async function renderMatchPlanning(eventId){
   try{const {data}=await call('getMatchPlanningData',{eventId});const e=data.event,availMap={},lineMap={};data.availability.forEach(a=>availMap[a.personId]=a);data.lineup.forEach(l=>lineMap[l.personId]=l);const canRespond={};(data.responsePersonIds||[]).forEach(id=>canRespond[id]=true);
     const playerRows=data.players.map(p=>{const a=availMap[p.personId],l=lineMap[p.personId];return `<tr><td><strong>${escapeHtml(p.displayName)}</strong></td><td>${escapeHtml(availabilityLabel(a?.status))}${a?.comment?`<small>${escapeHtml(a.comment)}</small>`:''}</td><td>${l?`${l.lineupRole==='STARTER'?'Titular':'Suplente'} ${l.jerseyNumber?'#'+escapeHtml(l.jerseyNumber):''}`:'—'}</td><td>${canRespond[p.personId]?`<select data-availability-person="${p.personId}"><option value="AVAILABLE" ${a?.status==='AVAILABLE'?'selected':''}>Disponible</option><option value="MAYBE" ${a?.status==='MAYBE'?'selected':''}>Duda</option><option value="UNAVAILABLE" ${a?.status==='UNAVAILABLE'?'selected':''}>No disponible</option></select>`:''}</td></tr>`}).join('');
-    const lineupEditor=data.canManage?`<div class="section-divider"></div><div class="section-heading"><h2>Armar equipo</h2><p>Seleccioná titulares y suplentes. La disponibilidad es orientativa: el staff decide la convocatoria final.</p></div><div class="lineup-builder">${data.players.map(p=>{const l=lineMap[p.personId];return `<label class="lineup-row"><input type="checkbox" data-lineup-person="${p.personId}" ${l?'checked':''}><span>${escapeHtml(p.displayName)}</span><select data-lineup-role="${p.personId}"><option value="STARTER" ${l?.lineupRole==='STARTER'?'selected':''}>Titular</option><option value="SUBSTITUTE" ${l?.lineupRole==='SUBSTITUTE'?'selected':''}>Suplente</option></select><input data-lineup-number="${p.personId}" placeholder="Dorsal" maxlength="3" value="${escapeHtml(l?.jerseyNumber||'')}"></label>`}).join('')}</div><button class="button primary" id="save-lineup">Guardar convocatoria/equipo</button>`:'';
+    const lineupEditor=data.canManage?`<div class="section-divider"></div><div class="section-heading"><h2>Armar equipo</h2><p>Seleccioná titulares y suplentes y definí el orden planificado. Al confirmar un acta, el orden oficial leído del PDF pasa a <strong>orderNo</strong> y este orden previo queda conservado como planificación.</p></div><div class="lineup-builder">${data.players.map(p=>{const l=lineMap[p.personId],plannedOrder=l?.plannedOrderNo||l?.orderNo||'';return `<label class="lineup-row"><input type="checkbox" data-lineup-person="${p.personId}" ${l?'checked':''}><span>${escapeHtml(p.displayName)}</span><select data-lineup-role="${p.personId}"><option value="STARTER" ${l?.lineupRole==='STARTER'?'selected':''}>Titular</option><option value="SUBSTITUTE" ${l?.lineupRole==='SUBSTITUTE'?'selected':''}>Suplente</option></select><input data-lineup-order="${p.personId}" type="number" min="1" max="99" inputmode="numeric" placeholder="Orden" value="${escapeHtml(plannedOrder)}" title="Orden planificado"><input data-lineup-number="${p.personId}" placeholder="Dorsal" maxlength="3" value="${escapeHtml(l?.jerseyNumber||'')}"></label>`}).join('')}</div><button class="button primary" id="save-lineup">Guardar convocatoria/equipo</button>`:'';
     const reports=(data.reports||[]).map(r=>`<li><strong>${escapeHtml(r.originalName)}</strong> · ${escapeHtml(r.status)}${r.parsedAt?` · <small>extraído ${escapeHtml(r.parsedAt)}</small>`:''} <button class="button mini secondary" data-report-view="${r.reportId}">Ver</button> <button class="button mini secondary" data-report-refresh="${r.reportId}">Reprocesar acta</button>${r.status==='PARSED'||r.status==='REVIEWED'?` <button class="button mini secondary" data-report-people="${r.reportId}">Vincular personas</button> <button class="button mini primary" data-report-apply="${r.reportId}">${r.status==='REVIEWED'?'Ver datos del acta':'Revisar datos'}</button>`:''}</li>`).join('');const reportBlock=data.canManage?`<div class="section-divider"></div><div class="section-heading"><h2>Acta oficial</h2><p>El PDF oficial es la fuente documental. Reprocesar vuelve a interpretar el mismo archivo y sincroniza los datos oficiales sin duplicarlos. Vincular personas relaciona jugadores y staff con Personas; Revisar datos permite comprobar lo detectado antes de consolidarlo.</p></div><form id="report-form" class="form-grid two"><label>Acta PDF<input id="report-file" type="file" accept="application/pdf,.pdf" required></label><div><button class="button secondary" type="submit">Subir acta</button></div></form>${reports?`<ul class="file-list">${reports}</ul>`:''}<div id="report-review-panel"></div>`:'';
     const statsTotals=(data.stats||[]).reduce((o,s)=>{o.players++;o.starters+=s.lineupRole==='STARTER'?1:0;o.subs+=s.lineupRole==='SUBSTITUTE'?1:0;o.points+=Number(s.points||0);o.yellow+=Number(s.yellowCards||0);o.red+=Number(s.redCards||0);return o;},{players:0,starters:0,subs:0,points:0,yellow:0,red:0});
     const starterStats=(data.stats||[]).filter(s=>s.lineupRole==='STARTER');
@@ -1153,14 +1265,14 @@ async function renderMatchPlanning(eventId){
     const statsBlock=(data.stats||[]).length?`<div class="section-divider"></div>${officialMatchSummaryHtml_(data)}${data.canManage&&advancedRows?`<details class="advanced-stats"><summary>Correcciones avanzadas de titulares</summary><p>Usá esta tabla solo si necesitás corregir manualmente los totales consolidados del acta.</p><div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Minutos</th><th>E</th><th>T</th><th>PC</th><th>D</th><th>Pts</th><th>Amar.</th><th>Rojas</th></tr></thead><tbody>${advancedRows}</tbody></table></div><button class="button secondary" id="save-match-stats">Guardar correcciones</button></details>`:''}`:'';
     const incidentsBlock='';
     const staffRoleLabel=r=>({COACH:'Entrenador',MANAGER:'Delegado',FIELD_DELEGATE:'Delegado de campo',STAFF:'Staff'})[r]||r||'Staff';
-    const staffBlock=data.staffAppearances?.length?`<div class="section-divider"></div><div class="section-heading"><h2>Staff de Marbella en acta</h2><p>Solo se muestran miembros del club detectados en el acta oficial.</p></div><div class="table-wrap compact-table"><table><thead><tr><th>Nombre</th><th>Rol</th><th>Licencia</th><th>Vínculo</th></tr></thead><tbody>${data.staffAppearances.map(x=>`<tr><td>${escapeHtml(x.staffName||'—')}</td><td>${escapeHtml(staffRoleLabel(x.staffRole))}</td><td>${escapeHtml(x.licenseNumber||'—')}</td><td>${x.status==='LINKED'?'Vinculado':'Pendiente'}</td></tr>`).join('')}</tbody></table></div>`:'';
+    const staffBlock=data.staffAppearances?.length?`<div class="section-divider"></div><div class="section-heading"><h2>Staff de Marbella en acta</h2><p>Solo se muestran miembros del club detectados en el acta oficial.</p></div><div class="table-wrap compact-table"><table><thead><tr><th>Nombre</th><th>Rol</th><th>Licencia</th><th>Vínculo</th></tr></thead><tbody>${data.staffAppearances.map(x=>`<tr><td>${escapeHtml(x.staffName||'—')}</td><td>${escapeHtml(staffRoleLabel(x.staffRole))}</td><td>${escapeHtml(x.licenseNumber||'—')}</td><td>${x.status==='LINKED'?'Vinculado':x.status==='INFO_ONLY'?'Dato del acta':'Pendiente'}</td></tr>`).join('')}</tbody></table></div>`:'';
     const planningHeader=matchHeaderHtml_(e,data.leagueMeta||data.meta||null,{compact:true});
     shell(`${planningHeader}<section class="panel match-workspace-panel"><div class="panel-heading"><div><h2>Disponibilidad</h2><p>Los jugadores o sus tutores pueden responder antes de que el staff arme el equipo.</p></div></div><div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Respuesta</th><th>Equipo</th><th>Mi respuesta</th></tr></thead><tbody>${playerRows}</tbody></table></div>${lineupEditor}${reportBlock}${statsBlock}${incidentsBlock}${staffBlock}<div class="button-row"><button class="button secondary" id="planning-back">Volver al partido</button></div><div id="message" class="message"></div></section>`,'calendar');
     document.getElementById('planning-back').onclick=()=>renderEventDetail(eventId);document.querySelectorAll('[data-availability-person]').forEach(sel=>sel.onchange=async()=>{try{await call('setMatchAvailability',{eventId,personId:sel.dataset.availabilityPerson,status:sel.value,comment:''});showMessage('Disponibilidad guardada.','success');}catch(err){showMessage(err.message,'error');}});
-    const sb=document.getElementById('save-lineup');if(sb)sb.onclick=async()=>{try{const lineup=[];document.querySelectorAll('[data-lineup-person]').forEach(ch=>{if(ch.checked){const id=ch.dataset.lineupPerson;lineup.push({personId:id,lineupRole:document.querySelector(`[data-lineup-role="${id}"]`).value,jerseyNumber:document.querySelector(`[data-lineup-number="${id}"]`).value});}});await call('saveMatchLineup',{eventId,lineup});showMessage('Equipo guardado.','success');setTimeout(()=>renderMatchPlanning(eventId),350);}catch(err){showMessage(err.message,'error');}};
+    const sb=document.getElementById('save-lineup');if(sb)sb.onclick=async()=>{try{const lineup=[];document.querySelectorAll('[data-lineup-person]').forEach(ch=>{if(ch.checked){const id=ch.dataset.lineupPerson;lineup.push({personId:id,lineupRole:document.querySelector(`[data-lineup-role="${id}"]`).value,orderNo:document.querySelector(`[data-lineup-order="${id}"]`)?.value||'',jerseyNumber:document.querySelector(`[data-lineup-number="${id}"]`).value});}});await call('saveMatchLineup',{eventId,lineup});showToast_('Equipo guardado.');await renderMatchPlanning(eventId);}catch(err){showMessage(err.message,'error');}};
     const ss=document.getElementById('save-match-stats');if(ss)ss.onclick=async()=>{showMessage('Las correcciones manuales de totales se deshabilitaron temporalmente para no eliminar suplentes. Las incidencias del acta son la fuente de verdad.','warning');};
-    const rf=document.getElementById('report-form');if(rf)rf.onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('report-file').files?.[0];if(!f)return;let uploaded=false;try{showMessage('Leyendo PDF y subiendo acta…');const dataUrl=await fileToDataUrl(f);let nativeText='';try{nativeText=await extractNativePdfText_(f);}catch(ignore){}const {data:r}=await call('uploadMatchReport',{eventId,fileDataUrl:dataUrl,originalName:f.name,sourceText:nativeText});uploaded=true;if(r.ocrAvailable)showMessage('Acta guardada y procesada con '+(r.ocrEngine||'extracción automática')+'.','success');else showMessage('Acta guardada. '+(r.ocrMessage||r.ocrReason||'La extracción queda pendiente')+'.','warning');}catch(err){showMessage(userErrorText_(err),'error');return;}if(uploaded){try{await renderMatchPlanning(eventId);}catch(err){showMessage('El acta se guardó correctamente, pero no se pudo refrescar la pantalla: '+userErrorText_(err),'warning');}}};
-    document.querySelectorAll('[data-report-view]').forEach(b=>b.onclick=async()=>{try{const {data:f}=await call('getMatchReportFile',{reportId:b.dataset.reportView});const w=window.open();if(w)w.document.write(`<iframe src="${f.dataUrl}" style="border:0;width:100%;height:100vh"></iframe>`);}catch(err){showMessage(userErrorText_(err),'error');}});document.querySelectorAll('[data-report-refresh]').forEach(b=>b.onclick=async()=>{const btn=b;btn.disabled=true;try{showMessage('Reprocesando el acta y sincronizando datos detectados…');let sourceText='';try{const {data:file}=await call('getMatchReportFile',{reportId:b.dataset.reportRefresh});if(file?.dataUrl)sourceText=await extractNativePdfText_(file.dataUrl);}catch(nativeErr){console.warn('No se pudo refrescar el texto nativo del PDF; se usará caché/OCR.',nativeErr);}const {data:r}=await call('reprocessMatchReport',{reportId:b.dataset.reportRefresh,sourceText});if(!r.ok){showMessage((r.ocrMessage||r.ocrReason||'No se pudo reprocesar el acta.')+(r.phase?' · Fase '+r.phase:''),'error');return;}showMessage(sourceText?'Acta reprocesada desde el PDF original. La revisión se sincronizó sin crear duplicados.':(r.fromCache?'Acta reprocesada usando texto guardado. La revisión se sincronizó sin crear duplicados.':'Acta reprocesada con '+(r.ocrEngine||'extracción automática')+'.'),'success');renderMatchReportReviewPanel_(r.review,b.dataset.reportRefresh,eventId);}catch(err){showMessage(userErrorText_(err),'error');}finally{btn.disabled=false;}});document.querySelectorAll('[data-report-people]').forEach(b=>b.onclick=()=>reviewAndCreateReportPeople(b.dataset.reportPeople,eventId));document.querySelectorAll('[data-report-apply]').forEach(b=>b.onclick=()=>reviewAndApplyReport(b.dataset.reportApply,eventId));
+    const rf=document.getElementById('report-form');if(rf)rf.onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('report-file').files?.[0];if(!f)return;let uploaded=false;const localBusy=beginUiBusy_('Leyendo PDF…');try{showMessage('Leyendo PDF y subiendo acta…');const dataUrl=await fileToDataUrl(f);let nativeText='';try{nativeText=await extractNativePdfText_(f);}catch(ignore){}endUiBusy_(localBusy);const {data:r}=await call('uploadMatchReport',{eventId,fileDataUrl:dataUrl,originalName:f.name,sourceText:nativeText});uploaded=true;if(r.ocrAvailable)showMessage('Acta guardada y procesada con '+(r.ocrEngine||'extracción automática')+'.','success');else showMessage('Acta guardada. '+(r.ocrMessage||r.ocrReason||'La extracción queda pendiente')+'.','warning');}catch(err){endUiBusy_(localBusy);showMessage(userErrorText_(err),'error');return;}if(uploaded){try{await renderMatchPlanning(eventId);}catch(err){showMessage('El acta se guardó correctamente, pero no se pudo refrescar la pantalla: '+userErrorText_(err),'warning');}}};
+    document.querySelectorAll('[data-report-view]').forEach(b=>b.onclick=async()=>{try{const {data:f}=await call('getMatchReportFile',{reportId:b.dataset.reportView});const w=window.open();if(w)w.document.write(`<iframe src="${f.dataUrl}" style="border:0;width:100%;height:100vh"></iframe>`);}catch(err){showMessage(userErrorText_(err),'error');}});document.querySelectorAll('[data-report-refresh]').forEach(b=>b.onclick=async()=>{const btn=b;btn.disabled=true;const localBusy=beginUiBusy_('Leyendo acta original…');try{showMessage('Reprocesando el acta y sincronizando datos detectados…');let sourceText='';try{const {data:file}=await call('getMatchReportFile',{reportId:b.dataset.reportRefresh});if(file?.dataUrl)sourceText=await extractNativePdfText_(file.dataUrl);}catch(nativeErr){console.warn('No se pudo refrescar el texto nativo del PDF; se usará caché/OCR.',nativeErr);}endUiBusy_(localBusy);const {data:r}=await call('reprocessMatchReport',{reportId:b.dataset.reportRefresh,sourceText});if(!r.ok){showMessage((r.ocrMessage||r.ocrReason||'No se pudo reprocesar el acta.')+(r.phase?' · Fase '+r.phase:''),'error');return;}showMessage(sourceText?'Acta reprocesada desde el PDF original. La revisión se sincronizó sin crear duplicados.':(r.fromCache?'Acta reprocesada usando texto guardado. La revisión se sincronizó sin crear duplicados.':'Acta reprocesada con '+(r.ocrEngine||'extracción automática')+'.'),'success');renderMatchReportReviewPanel_(r.review,b.dataset.reportRefresh,eventId);}catch(err){showMessage(userErrorText_(err),'error');}finally{endUiBusy_(localBusy);btn.disabled=false;}});document.querySelectorAll('[data-report-people]').forEach(b=>b.onclick=()=>reviewAndCreateReportPeople(b.dataset.reportPeople,eventId));document.querySelectorAll('[data-report-apply]').forEach(b=>b.onclick=()=>reviewAndApplyReport(b.dataset.reportApply,eventId));
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar el partido</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
 }
 async function reviewAndCreateReportPeople(reportId,eventId){try{
@@ -1179,19 +1291,19 @@ async function reviewAndCreateReportPeople(reportId,eventId){try{
 function renderMatchReportReviewPanel_(review,reportId,eventId){
   const host=document.getElementById('report-review-panel');if(!host)return;
   const ex=review.summary||{},side=review.clubSide==='HOME'?'Local':'Visitante',linked=(review.linked||[]).length,pending=(review.unmatched||[]).length,v=review.validation||{};
-  const players=(review.players||[]).map(x=>`<tr><td>${escapeHtml(x.jerseyNumber||'—')}</td><td>${escapeHtml(x.name||'')}</td><td>${escapeHtml(x.licenseNumber||'—')}</td><td>${x.lineupRole==='STARTER'?'Titular':'Suplente'}${x.isCaptain?' · Capitán':''}</td><td>${x.status==='LINKED'?'Vinculado':'Pendiente'}</td></tr>`).join('');
+  const players=(review.players||[]).slice().sort((a,b)=>Number(a.orderNo||999)-Number(b.orderNo||999)).map(x=>`<tr><td>${escapeHtml(x.orderNo||'—')}</td><td>${escapeHtml(x.jerseyNumber||'—')}</td><td>${escapeHtml(x.name||'')}</td><td>${escapeHtml(x.licenseNumber||'—')}</td><td>${x.lineupRole==='STARTER'?'Titular':'Suplente'}${x.isCaptain?' · Capitán':''}</td><td>${x.status==='LINKED'?'Vinculado':'Pendiente'}</td></tr>`).join('');
   const staff=(review.staff||[]).map(x=>`<tr><td>${escapeHtml(({COACH:'Entrenador',MANAGER:'Delegado',FIELD_DELEGATE:'Delegado de campo'}[x.staffRole]||x.staffRole))}</td><td>${escapeHtml(x.name||'—')}</td><td>${escapeHtml(x.licenseNumber||'—')}</td><td>${x.status==='LINKED'?'Vinculado':x.status==='INFO_ONLY'?'Dato del acta':'Pendiente'}</td></tr>`).join('');
   const score=(review.scoringEvents||[]).map(x=>`<li>#${escapeHtml(x.jerseyNumber)} · ${escapeHtml(x.eventType)} · min ${escapeHtml(x.minute)} · ${escapeHtml(String(x.points||0))} pt</li>`).join('');
   const subs=(review.substitutions||[]).map(x=>`<li>#${escapeHtml(x.jerseyIn)} por #${escapeHtml(x.jerseyOut)} · ${escapeHtml(x.changeType||'Cambio')} · min ${escapeHtml(x.minute||'—')}</li>`).join('');
   const cards=(review.disciplinaryEvents||[]).map(x=>`<li>#${escapeHtml(x.jerseyNumber)} · ${x.cardType==='RED'?'Roja':'Amarilla'} · min ${escapeHtml(x.minute)}</li>`).join('');
   const errors=(v.errors||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join(''),warnings=(v.warnings||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('');
-  host.innerHTML=`<div class="section-divider"></div><div class="section-heading"><h2>Revisión del acta</h2><p>Marbella detectado como <strong>${escapeHtml(side)}</strong>. Parser ${escapeHtml(review.parserVersion||'')}. No se aplicará nada hasta confirmar.</p></div><div class="form-grid two"><label>Equipo local<input id="report-review-home" value="${escapeHtml(ex.homeTeam||'')}" readonly></label><label>Equipo visitante<input id="report-review-away" value="${escapeHtml(ex.awayTeam||'')}" readonly></label><label>Resultado local<input id="report-review-rh" value="${escapeHtml(ex.resultHome||'')}"></label><label>Resultado visitante<input id="report-review-ra" value="${escapeHtml(ex.resultAway||'')}"></label><label>Ubicación / campo<input id="report-review-location" value="${escapeHtml(ex.location||'')}"></label><label>Árbitro<input id="report-review-referee" value="${escapeHtml(ex.refereeName||'')}"></label></div><div class="event-summary"><p><strong>Jugadores Marbella:</strong> ${v.playerCount??(review.players||[]).length} · Titulares: ${v.starterCount??'—'} · Suplentes: ${v.substituteCount??'—'}</p><p><strong>Puntos calculados:</strong> ${v.calculatedPoints??0}${v.officialPoints!==null&&v.officialPoints!==undefined?' / oficial '+v.officialPoints:''} · <strong>Cambios:</strong> ${v.substitutionCount??0} · <strong>Amarillas:</strong> ${v.yellowCount??0} · <strong>Rojas:</strong> ${v.redCount??0}</p><p><strong>Personas vinculadas:</strong> ${linked} · <strong>Pendientes:</strong> ${pending}</p></div>${errors?`<div class="message error"><strong>No se puede aplicar todavía:</strong><ul>${errors}</ul></div>`:''}${warnings?`<div class="message warning"><strong>Revisar:</strong><ul>${warnings}</ul></div>`:''}${players?`<h3>Jugadores de Marbella</h3><div class="table-wrap"><table><thead><tr><th>Dorsal</th><th>Jugador</th><th>Licencia</th><th>Convocatoria</th><th>Vínculo</th></tr></thead><tbody>${players}</tbody></table></div>`:''}${staff?`<h3>Staff de Marbella</h3><div class="table-wrap"><table><thead><tr><th>Función</th><th>Nombre</th><th>Licencia / Nº acta</th><th>Vínculo</th></tr></thead><tbody>${staff}</tbody></table></div>`:''}<div class="form-grid three"><div><h3>Puntos</h3>${score?`<ul>${score}</ul>`:'<p>Sin anotaciones.</p>'}</div><div><h3>Cambios</h3>${subs?`<ul>${subs}</ul>`:'<p>Sin cambios detectados.</p>'}</div><div><h3>Tarjetas</h3>${cards?`<ul>${cards}</ul>`:'<p>Sin tarjetas.</p>'}</div></div><div class="button-row"><button class="button primary" id="report-review-apply" ${v.ok===false?'disabled':''}>Aplicar datos del acta</button><button class="button secondary" id="report-review-cancel">Cerrar revisión</button></div>`;
+  host.innerHTML=`<div class="section-divider"></div><div class="section-heading"><h2>Revisión del acta</h2><p>Marbella detectado como <strong>${escapeHtml(side)}</strong>. Parser ${escapeHtml(review.parserVersion||'')}. No se aplicará nada hasta confirmar.</p></div><div class="form-grid two"><label>Equipo local<input id="report-review-home" value="${escapeHtml(ex.homeTeam||'')}" readonly></label><label>Equipo visitante<input id="report-review-away" value="${escapeHtml(ex.awayTeam||'')}" readonly></label><label>Resultado local<input id="report-review-rh" value="${escapeHtml(ex.resultHome||'')}"></label><label>Resultado visitante<input id="report-review-ra" value="${escapeHtml(ex.resultAway||'')}"></label><label>Ubicación / campo<input id="report-review-location" value="${escapeHtml(ex.location||'')}"></label><label>Árbitro<input id="report-review-referee" value="${escapeHtml(ex.refereeName||'')}"></label></div><div class="event-summary"><p><strong>Jugadores Marbella:</strong> ${v.playerCount??(review.players||[]).length} · Titulares: ${v.starterCount??'—'} · Suplentes: ${v.substituteCount??'—'}</p><p><strong>Puntos calculados:</strong> ${v.calculatedPoints??0}${v.officialPoints!==null&&v.officialPoints!==undefined?' / oficial '+v.officialPoints:''} · <strong>Cambios:</strong> ${v.substitutionCount??0} · <strong>Amarillas:</strong> ${v.yellowCount??0} · <strong>Rojas:</strong> ${v.redCount??0}</p><p><strong>Personas vinculadas:</strong> ${linked} · <strong>Pendientes:</strong> ${pending}</p></div>${errors?`<div class="message error"><strong>No se puede aplicar todavía:</strong><ul>${errors}</ul></div>`:''}${warnings?`<div class="message warning"><strong>Revisar:</strong><ul>${warnings}</ul></div>`:''}${players?`<h3>Jugadores de Marbella</h3><div class="table-wrap"><table><thead><tr><th>Orden</th><th>Dorsal</th><th>Jugador</th><th>Licencia</th><th>Convocatoria</th><th>Vínculo</th></tr></thead><tbody>${players}</tbody></table></div>`:''}${staff?`<h3>Staff de Marbella</h3><div class="table-wrap"><table><thead><tr><th>Función</th><th>Nombre</th><th>Licencia / Nº acta</th><th>Vínculo</th></tr></thead><tbody>${staff}</tbody></table></div>`:''}<div class="form-grid three"><div><h3>Puntos</h3>${score?`<ul>${score}</ul>`:'<p>Sin anotaciones.</p>'}</div><div><h3>Cambios</h3>${subs?`<ul>${subs}</ul>`:'<p>Sin cambios detectados.</p>'}</div><div><h3>Tarjetas</h3>${cards?`<ul>${cards}</ul>`:'<p>Sin tarjetas.</p>'}</div></div><div class="button-row"><button class="button primary" id="report-review-apply" ${v.ok===false?'disabled':''}>Aplicar datos del acta</button><button class="button secondary" id="report-review-cancel">Cerrar revisión</button></div>`;
   host.scrollIntoView({behavior:'smooth',block:'start'});document.getElementById('report-review-cancel').onclick=()=>{host.innerHTML='';};
   const apply=document.getElementById('report-review-apply');if(apply)apply.onclick=async()=>{try{if(v.ok===false)return showMessage('Corrige o reprocesa el acta antes de aplicarla.','error');const confirmed={homeTeam:ex.homeTeam||'',awayTeam:ex.awayTeam||'',resultHome:val('report-review-rh'),resultAway:val('report-review-ra'),refereeName:val('report-review-referee'),eventDate:ex.eventDate||'',startTime:ex.startTime||'',location:val('report-review-location')};showMessage('Aplicando datos del acta…');await call('applyMatchReport',{reportId,confirmed,reviewNotes:'Revisado desde interfaz · parser '+(review.parserVersion||'')});calendarData=null;alert('Acta aplicada y sincronizada: los datos oficiales anteriores de este partido fueron actualizados, no duplicados.');renderEventDetail(eventId);}catch(err){showMessage(err.message,'error');}};
 }
 async function reviewAndApplyReport(reportId,eventId){try{
   let {data:review}=await call('getMatchReportReview',{reportId});
   const unmatched=(review.unmatched||[]).filter(x=>x.kind==='PLAYER'||['COACH','MANAGER'].includes(x.staffRole));
-  if(unmatched.length){const preview=unmatched.slice(0,12).map(x=>`• ${x.name}${x.staffRole&&x.staffRole!=='PLAYER'?' · '+({COACH:'Entrenador',MANAGER:'Delegado',FIELD_DELEGATE:'Delegado de campo'}[x.staffRole]||x.staffRole):''}${x.licenseNumber?' · '+x.licenseNumber:''}`).join('\n');const more=unmatched.length>12?`\n… y ${unmatched.length-12} más.`:'';const canCreatePeople=['ADMIN','MANAGER'].includes(currentUser?.role);if(canCreatePeople&&confirm(`Hay ${unmatched.length} personas de Marbella sin vincular:\n\n${preview}${more}\n\n¿Crear estas personas desde el acta?\nLos jugadores/entrenador/delegado se asignarán a esta división/equipo. El delegado de campo solo se registrará como función del partido.`)){showMessage('Vinculando personas del acta…');const created=await call('createMatchReportPeople',{reportId,keys:unmatched.map(x=>x.key)});review=created.data.review;}else if(!canCreatePeople){alert(`Hay ${unmatched.length} personas sin vincular. Un administrador o manager puede crearlas desde el acta.\n\n${preview}${more}`);}}
+  if(unmatched.length){const preview=unmatched.slice(0,12).map(x=>`• ${x.name}${x.staffRole&&x.staffRole!=='PLAYER'?' · '+({COACH:'Entrenador',MANAGER:'Delegado',FIELD_DELEGATE:'Delegado de campo'}[x.staffRole]||x.staffRole):''}${x.licenseNumber?' · '+x.licenseNumber:''}`).join('\n');const more=unmatched.length>12?`\n… y ${unmatched.length-12} más.`:'';const canCreatePeople=['ADMIN','MANAGER'].includes(currentUser?.role);if(canCreatePeople&&confirm(`Hay ${unmatched.length} personas de Marbella sin vincular:\n\n${preview}${more}\n\n¿Crear estas personas desde el acta?\nLos jugadores se asignarán a la división; entrenador/delegado conservarán su alcance correspondiente. El delegado de campo solo se registrará como dato del partido.`)){showMessage('Vinculando personas del acta…');const created=await call('createMatchReportPeople',{reportId,keys:unmatched.map(x=>x.key)});review=created.data.review;}else if(!canCreatePeople){alert(`Hay ${unmatched.length} personas sin vincular. Un administrador o manager puede crearlas desde el acta.\n\n${preview}${more}`);}}
   renderMatchReportReviewPanel_(review,reportId,eventId);
 }catch(err){showMessage(err.message,'error');}}

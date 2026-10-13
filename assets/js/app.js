@@ -678,23 +678,63 @@ async function extractNativePdfText_(fileOrDataUrl){
         if(!row){row={y,items:[]};rows.push(row);}row.items.push({x,w,str});
       });
       rows.sort((a,b)=>b.y-a.y);
-      const lines=rows.map(row=>{
+      const viewport=page.getViewport({scale:1});
+      const midX=viewport.width/2;
+      const lines=[];
+      let farSection='',farChangeTeam='',farCardTeam='';
+      rows.forEach(row=>{
         row.items.sort((a,b)=>a.x-b.x);let line='',cursor=null;
         row.items.forEach(item=>{
           if(cursor===null){
-            // Preserve absolute column position too. If a FAR row only contains the AWAY
-            // column (uneven substitute benches), starting the line at column zero loses
-            // which team it belongs to and can leak rival players into Marbella.
-            line=(item.x>300?' '.repeat(24):'')+item.str;cursor=item.x+item.w;return;
+            line=(item.x>midX?' '.repeat(24):'')+item.str;cursor=item.x+item.w;return;
           }
           const gap=Math.max(0,item.x-cursor);
-          // Preserve column separation. Large gaps become multiple spaces so the FAR
-          // parser can reliably distinguish HOME (left) from AWAY (right).
           const spaces=gap>90?12:gap>45?7:gap>20?4:gap>7?2:1;
           line+=' '.repeat(spaces)+item.str;cursor=Math.max(cursor,item.x+item.w);
         });
-        return line.trimEnd();
-      }).filter(Boolean);
+        line=line.trimEnd();
+        if(line)lines.push(line);
+
+        const flatLine=line.replace(/\s+/g,' ').trim();
+        if(/^Marcador$/i.test(flatLine))farSection='SCORING';
+        else if(/^Cambios$/i.test(flatLine))farSection='CHANGES';
+        else if(/Expulsiones\s+temporales/i.test(flatLine))farSection='CARDS';
+
+        if(farSection==='CHANGES'){
+          if(/Equipo\s+local\s*:/i.test(flatLine))farChangeTeam='HOME';
+          else if(/Equipo\s+visitante\s*:/i.test(flatLine))farChangeTeam='AWAY';
+          if(farChangeTeam && /^(?:Tipo\s*\*|Dorsal\s+entra|Dorsal\s+sale|Minuto\b)/i.test(flatLine)){
+            lines.push(`__FAR_CHANGE_${farChangeTeam}__ ${flatLine}`);
+          }
+        }
+
+        if(farSection==='CARDS'){
+          if(/Equipo\s+local\s*:/i.test(flatLine))farCardTeam='HOME';
+          else if(/Equipo\s+visitante\s*:/i.test(flatLine))farCardTeam='AWAY';
+          if(farCardTeam){
+            const cardColumns={YELLOW:[],RED:[]};
+            row.items.forEach(item=>cardColumns[item.x<midX?'YELLOW':'RED'].push(item.str));
+            ['YELLOW','RED'].forEach(cardType=>{
+              const cardText=cardColumns[cardType].join(' ').replace(/\s+/g,' ').trim();
+              if(/^(?:Tipo\s*\*|Dorsal\b|Minuto\b)/i.test(cardText)){
+                lines.push(`__FAR_CARD_${farCardTeam}_${cardType}__ ${cardText}`);
+              }
+            });
+          }
+        }
+
+        // Preserve the physical HOME/AWAY column for roster rows. Native PDF text can
+        // flatten uneven benches and make the server infer the wrong team. These tagged
+        // rows are additive metadata used only by the FAR roster parser.
+        const sideItems={HOME:[],AWAY:[]};
+        row.items.forEach(item=>sideItems[item.x<midX?'HOME':'AWAY'].push(item.str));
+        ['HOME','AWAY'].forEach(side=>{
+          const sideText=sideItems[side].join(' ').replace(/\s+/g,' ').trim();
+          if(!/0\d{6}/.test(sideText))return;
+          if(!/^\d{1,3}\s+/.test(sideText))return;
+          lines.push(`__FAR_ROSTER_${side}__ ${sideText}`);
+        });
+      });
       pages.push(lines.join('\n'));
     }
     const text=pages.join('\n\n');

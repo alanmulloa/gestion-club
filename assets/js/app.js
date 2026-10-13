@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.28';
+const FRONTEND_BUILD = '0.6.29';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
@@ -705,7 +705,7 @@ function renderAssignmentsSection() {
   const activeRoles=(data.roles||[]).filter(r=>r.status==='ACTIVE'&&recommendedRoleCategories_().includes(r.category));
   const activeDivisions=(data.divisions||[]).filter(d=>d.status==='ACTIVE');
   const seasons=(data.seasons||[]).filter(x=>x.seasonId!==data.selectedSeasonId).sort((a,b)=>String(b.startDate||'').localeCompare(String(a.startDate||'')));
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Persona + cargo + división + temporada. El alcance del cargo evita combinaciones incoherentes y se controlan duplicados.</p></div><div class="button-row"><button class="button secondary" id="copy-assignments" ${seasons.length?'':'disabled'}>Copiar temporada anterior</button><button class="button primary" id="new-assignment">Nueva asignación</button></div></div><div class="filter-bar"><label class="filter-grow">Buscar<input id="assignment-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Persona o cargo"></label><label>Cargo<select id="assignment-filter-role"><option value="">Todos</option>${activeRoles.map(r=>`<option value="${escapeHtml(r.roleId)}" ${roleId===r.roleId?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select></label><label>División<select id="assignment-filter-division"><option value="">Todas</option><option value="TRANSVERSAL" ${divisionId==='TRANSVERSAL'?'selected':''}>Transversal</option>${activeDivisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="assignment-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activas</option><option value="ENDED" ${status==='ENDED'?'selected':''}>Finalizadas</option></select></label><button class="button secondary filter-clear" id="assignment-filter-clear">Limpiar</button></div><p class="filter-count">${filtered.length} de ${(data.assignments||[]).length} asignaciones</p>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay asignaciones que coincidan con los filtros.')}<div id="editor-host"></div></section>`;
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Persona + cargo + división + temporada. El alcance del cargo evita combinaciones incoherentes y se controlan duplicados.</p></div><div class="button-row"><button class="button secondary" id="copy-assignments" ${seasons.length?'':'disabled'}>Copiar temporada anterior</button><button class="button primary" id="new-assignment">Nuevas asignaciones</button></div></div><div class="filter-bar"><label class="filter-grow">Buscar<input id="assignment-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Persona o cargo"></label><label>Cargo<select id="assignment-filter-role"><option value="">Todos</option>${activeRoles.map(r=>`<option value="${escapeHtml(r.roleId)}" ${roleId===r.roleId?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select></label><label>División<select id="assignment-filter-division"><option value="">Todas</option><option value="TRANSVERSAL" ${divisionId==='TRANSVERSAL'?'selected':''}>Transversal</option>${activeDivisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="assignment-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activas</option><option value="ENDED" ${status==='ENDED'?'selected':''}>Finalizadas</option></select></label><button class="button secondary filter-clear" id="assignment-filter-clear">Limpiar</button></div><p class="filter-count">${filtered.length} de ${(data.assignments||[]).length} asignaciones</p>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay asignaciones que coincidan con los filtros.')}<div id="editor-host"></div></section>`;
 }
 
 function renderGuardiansSection() {
@@ -721,7 +721,7 @@ function wireStructureSection() {
   document.getElementById('new-person')?.addEventListener('click', () => showPersonEditor());
   document.getElementById('new-role')?.addEventListener('click', () => showRoleEditor());
   document.getElementById('new-division')?.addEventListener('click', () => showDivisionEditor());
-  document.getElementById('new-assignment')?.addEventListener('click', () => showAssignmentEditor());
+  document.getElementById('new-assignment')?.addEventListener('click', () => showMultiAssignmentEditor_());
   bind('[data-create-access]', data => renderUsers(data.createAccess));
   bind('[data-open-person]', data => openPersonProfile_(data.openPerson,data.personTab||'club'));
   bind('[data-link-access]', async data => {
@@ -806,7 +806,7 @@ function renderPersonProfile_(profile,tab){
   }else if(tab==='club'){
     const assignments=(structureData.assignments||[]).filter(a=>a.personId===person.personId);
     body=assignments.length?`<div class="table-wrap"><table><thead><tr><th>Cargo</th><th>División</th><th>Estado</th><th></th></tr></thead><tbody>${assignments.map(a=>`<tr><td>${escapeHtml(roles[a.roleId]?.name||'—')}</td><td>${escapeHtml(divisions[a.divisionId]?.name||'Transversal')}</td><td>${statusBadge(a.status)}</td><td><button class="button mini secondary" data-profile-edit-assignment="${escapeHtml(a.assignmentId)}">Editar</button></td></tr>`).join('')}</tbody></table></div>`:emptyTable('No tiene asignaciones en esta temporada.');
-    body+=`<div class="editor-actions"><button class="button primary" id="profile-new-assignment">Añadir cargo / división</button></div>`;
+    body+=`<div class="editor-actions"><button class="button primary" id="profile-new-assignment">Añadir asignaciones</button></div>`;
   }else if(tab==='family'){
     const people=profile.family.persons||[],rels=profile.family.relations||[],byId=Object.fromEntries(people.map(p=>[p.personId,p])),minor=isMinorClient_(person.birthDate);
     const own=rels.filter(r=>r.childPersonId===person.personId||r.guardianPersonId===person.personId);
@@ -827,7 +827,7 @@ function renderPersonProfile_(profile,tab){
   document.getElementById('close-person-profile').onclick=()=>host.innerHTML='';
   document.querySelectorAll('[data-profile-tab]').forEach(b=>b.onclick=()=>renderPersonProfile_(profile,b.dataset.profileTab));
   document.getElementById('profile-edit-person')?.addEventListener('click',()=>showPersonEditor(person));
-  document.getElementById('profile-new-assignment')?.addEventListener('click',()=>showAssignmentEditor({personId:person.personId,status:'ACTIVE'}));
+  document.getElementById('profile-new-assignment')?.addEventListener('click',()=>showMultiAssignmentEditor_({personId:person.personId,returnToPersonId:person.personId}));
   document.querySelectorAll('[data-profile-edit-assignment]').forEach(b=>b.onclick=()=>showAssignmentEditor((structureData.assignments||[]).find(a=>a.assignmentId===b.dataset.profileEditAssignment)));
   document.getElementById('profile-manage-documents')?.addEventListener('click',()=>{saveUiStatePatch_({documentFilters:{personId:person.personId}});renderDocuments();});
   document.getElementById('profile-manage-access')?.addEventListener('click',()=>renderUsers(person.personId));
@@ -865,6 +865,84 @@ function showTeamEditor(item = {}) {
 function assignmentRuleClient_(role){
   if(!role)return 'OPTIONAL';if(role.category==='PLAYER'||role.scopeType==='DIVISION')return 'REQUIRED';if(['REFEREE','COLLABORATOR'].includes(role.category)||role.scopeType==='TRANSVERSAL')return 'FORBIDDEN';return 'OPTIONAL';
 }
+function assignmentDivisionChecks_(rowId,activeDivisions,selectedIds){
+  const selected=new Set(selectedIds||[]);
+  if(!activeDivisions.length)return '<p class="muted">No hay divisiones activas disponibles.</p>';
+  return '<div class="assignment-division-grid">'+activeDivisions.map(d=>`<label class="assignment-check"><input type="checkbox" data-assignment-division="${rowId}" value="${escapeHtml(d.divisionId)}" ${selected.has(d.divisionId)?'checked':''}><span>${escapeHtml(d.name)}</span></label>`).join('')+'</div>';
+}
+
+function multiAssignmentRowHtml_(rowId,item,activeRoles,activeDivisions){
+  const roleId=item.roleId||'',role=activeRoles.find(r=>r.roleId===roleId),rule=assignmentRuleClient_(role);
+  const initialMode=rule==='FORBIDDEN'?'TRANSVERSAL':(item.mode||(item.divisionIds&&item.divisionIds.length?'DIVISION':'DIVISION'));
+  return `<section class="assignment-batch-row" data-assignment-row="${rowId}">
+    <div class="assignment-row-head"><strong>Asignación <span data-assignment-number></span></strong><button type="button" class="button mini link" data-remove-assignment-row="${rowId}">Quitar</button></div>
+    <div class="form-grid two"><label>Cargo<select data-batch-role="${rowId}" required>${optionList(activeRoles,'roleId',x=>x.name,roleId,false)}</select></label><label>Estado<select data-batch-status="${rowId}"><option value="ACTIVE" ${item.status!=='ENDED'?'selected':''}>Activa</option><option value="ENDED" ${item.status==='ENDED'?'selected':''}>Finalizada</option></select></label></div>
+    <div class="assignment-scope-box" data-batch-scope-box="${rowId}">
+      <div class="assignment-scope-head"><strong>Alcance</strong><small data-batch-help="${rowId}"></small></div>
+      <div class="assignment-mode-row">
+        <label class="assignment-mode"><input type="radio" name="batch-mode-${rowId}" value="DIVISION" data-batch-mode="${rowId}" ${initialMode==='DIVISION'?'checked':''}> Por división</label>
+        <label class="assignment-mode"><input type="radio" name="batch-mode-${rowId}" value="TRANSVERSAL" data-batch-mode="${rowId}" ${initialMode==='TRANSVERSAL'?'checked':''}> Transversal</label>
+      </div>
+      <div data-batch-divisions-wrap="${rowId}">${assignmentDivisionChecks_(rowId,activeDivisions,item.divisionIds||[])}</div>
+    </div>
+    <details class="advanced-fields"><summary>Vigencia y notas (opcional)</summary><div class="form-grid two"><label>Desde<input data-batch-start="${rowId}" type="date" value="${escapeHtml(item.startDate||'')}"></label><label>Hasta<input data-batch-end="${rowId}" type="date" value="${escapeHtml(item.endDate||'')}"></label></div><label>Notas<textarea data-batch-notes="${rowId}" maxlength="500" rows="2">${escapeHtml(item.notes||'')}</textarea></label></details>
+  </section>`;
+}
+
+function showMultiAssignmentEditor_(options={}){
+  const host=document.getElementById('editor-host');if(!host)return;
+  const activePeople=(structureData.persons||[]).filter(x=>x.status==='ACTIVE'||x.personId===options.personId);
+  const activeRoles=(structureData.roles||[]).filter(x=>x.status==='ACTIVE'&&recommendedRoleCategories_().includes(x.category));
+  const activeDivisions=(structureData.divisions||[]).filter(x=>x.status==='ACTIVE');
+  const fixedPersonId=options.personId||'';
+  let rowSeq=0;
+  host.innerHTML=`<section class="inline-editor assignment-batch-editor"><div class="editor-heading"><div><h3>Nuevas asignaciones</h3><p>Cargá varios cargos y varias divisiones en una sola operación. La temporada es la seleccionada en la cabecera.</p></div><button type="button" class="button link" id="close-editor">Cerrar</button></div><form id="assignment-batch-form" class="form-stack"><label>Persona<select id="assignment-batch-person" required ${fixedPersonId?'disabled':''}>${optionList(activePeople,'personId',x=>x.displayName,fixedPersonId,false)}</select></label><div class="info-strip"><strong>Podés resolver todo el perfil de una vez.</strong> Por ejemplo, Entrenador en M16 + M18, Coordinador transversal y Árbitro transversal. Los duplicados existentes se omiten.</div><div id="assignment-batch-rows"></div><div><button type="button" class="button secondary" id="assignment-batch-add">+ Añadir otra asignación</button></div><div class="editor-actions"><div id="editor-message" class="message"></div><button class="button primary" type="submit">Guardar asignaciones</button></div></form></section>`;
+  document.getElementById('close-editor').onclick=()=>{host.innerHTML='';};
+  const rowsHost=document.getElementById('assignment-batch-rows');
+  const renumber=()=>rowsHost.querySelectorAll('[data-assignment-row]').forEach((el,i)=>{const n=el.querySelector('[data-assignment-number]');if(n)n.textContent=String(i+1);const remove=el.querySelector('[data-remove-assignment-row]');if(remove)remove.style.visibility=rowsHost.querySelectorAll('[data-assignment-row]').length>1?'visible':'hidden';});
+  const syncRow=(rowId)=>{
+    const roleId=document.querySelector(`[data-batch-role="${rowId}"]`)?.value||'',role=activeRoles.find(r=>r.roleId===roleId),rule=assignmentRuleClient_(role);
+    const modes=[...document.querySelectorAll(`[data-batch-mode="${rowId}"]`)];const divisionMode=modes.find(x=>x.value==='DIVISION'),transversalMode=modes.find(x=>x.value==='TRANSVERSAL');
+    const help=document.querySelector(`[data-batch-help="${rowId}"]`),wrap=document.querySelector(`[data-batch-divisions-wrap="${rowId}"]`);
+    if(rule==='REQUIRED'){divisionMode.checked=true;divisionMode.disabled=true;transversalMode.disabled=true;if(help)help.textContent='Este cargo requiere una o varias divisiones.';}
+    else if(rule==='FORBIDDEN'){transversalMode.checked=true;divisionMode.disabled=true;transversalMode.disabled=true;if(help)help.textContent='Cargo transversal: no requiere división.';}
+    else{divisionMode.disabled=false;transversalMode.disabled=false;if(help)help.textContent='Elegí una o varias divisiones, o marcá Transversal.';}
+    const mode=modes.find(x=>x.checked)?.value||'DIVISION';if(wrap)wrap.hidden=mode!=='DIVISION';
+  };
+  const addRow=(item={})=>{
+    const rowId=++rowSeq;rowsHost.insertAdjacentHTML('beforeend',multiAssignmentRowHtml_(rowId,item,activeRoles,activeDivisions));
+    const role=document.querySelector(`[data-batch-role="${rowId}"]`);if(role)role.onchange=()=>syncRow(rowId);
+    document.querySelectorAll(`[data-batch-mode="${rowId}"]`).forEach(x=>x.onchange=()=>syncRow(rowId));
+    const remove=document.querySelector(`[data-remove-assignment-row="${rowId}"]`);if(remove)remove.onclick=()=>{document.querySelector(`[data-assignment-row="${rowId}"]`)?.remove();renumber();};
+    syncRow(rowId);renumber();
+  };
+  document.getElementById('assignment-batch-add').onclick=()=>addRow();
+  addRow();
+  document.getElementById('assignment-batch-form').onsubmit=async(event)=>{
+    event.preventDefault();const button=event.submitter;if(button)button.disabled=true;showMessage('Guardando asignaciones…','info','editor-message');
+    const personId=fixedPersonId||val('assignment-batch-person'),seasonId=structureData.selectedSeasonId||structureData.activeSeasonId||selectedSeasonId_();
+    const assignments=[];let validationError='';
+    rowsHost.querySelectorAll('[data-assignment-row]').forEach(row=>{
+      if(validationError)return;const rowId=row.dataset.assignmentRow,roleId=document.querySelector(`[data-batch-role="${rowId}"]`)?.value||'',role=activeRoles.find(r=>r.roleId===roleId),rule=assignmentRuleClient_(role),mode=document.querySelector(`[data-batch-mode="${rowId}"]:checked`)?.value||'DIVISION';
+      const base={personId,roleId,seasonId,status:document.querySelector(`[data-batch-status="${rowId}"]`)?.value||'ACTIVE',startDate:document.querySelector(`[data-batch-start="${rowId}"]`)?.value||'',endDate:document.querySelector(`[data-batch-end="${rowId}"]`)?.value||'',notes:document.querySelector(`[data-batch-notes="${rowId}"]`)?.value||''};
+      if(!roleId){validationError='Seleccioná un cargo en todas las filas.';return;}
+      if(rule==='FORBIDDEN'||mode==='TRANSVERSAL'){assignments.push(Object.assign({},base,{divisionId:''}));return;}
+      const selected=[...document.querySelectorAll(`[data-assignment-division="${rowId}"]:checked`)].map(x=>x.value);
+      if(!selected.length){validationError='Seleccioná al menos una división para '+(role?.name||'el cargo')+'.';return;}
+      selected.forEach(divisionId=>assignments.push(Object.assign({},base,{divisionId})));
+    });
+    if(validationError){showMessage(validationError,'error','editor-message');if(button)button.disabled=false;return;}
+    const seen=new Set(),unique=[];for(const a of assignments){const key=[a.personId,a.roleId,a.divisionId,a.seasonId,a.status].join('|');if(!seen.has(key)){seen.add(key);unique.push(a);}}
+    try{
+      const res=(await call('saveAssignmentsBatch',{personId,seasonId,assignments:unique})).data||{};
+      const parts=[`${res.created||0} creadas`];if(res.skipped)parts.push(`${res.skipped} duplicadas omitidas`);if((res.errors||[]).length)parts.push(`${res.errors.length} con error`);showToast_(parts.join(' · '));
+      await loadStructureData();
+      if(options.returnToPersonId)await openPersonProfile_(options.returnToPersonId,'club');else await renderStructure('assignments');
+    }catch(error){showMessage(error.message,'error','editor-message');if(button)button.disabled=false;}
+  };
+  host.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
 function showAssignmentEditor(item = {}) {
   const activePeople = (structureData.persons || []).filter(x => x.status === 'ACTIVE' || x.personId === item.personId);
   const activeRoles = (structureData.roles || []).filter(x => x.roleId === item.roleId || (x.status === 'ACTIVE' && recommendedRoleCategories_().includes(x.category)));

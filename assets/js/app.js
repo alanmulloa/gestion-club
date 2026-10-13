@@ -1,3 +1,4 @@
+const FRONTEND_BUILD = '0.6.28';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
@@ -216,7 +217,9 @@ function brandMarkup() {
   const logo = clubConfig?.logoDataUrl
     ? `<img class="brand-logo" src="${escapeHtml(clubConfig.logoDataUrl)}" alt="Logo">`
     : `<span class="brand-mark">${escapeHtml((clubConfig?.shortName || 'GC').slice(0, 2).toUpperCase())}</span>`;
-  return `${logo}<div><strong>${escapeHtml(name)}</strong><small>Versión ${escapeHtml(config.appVersion || '?')} · ${escapeHtml(config.environment || 'sin configurar')}</small></div>`;
+  const backendVersion=String(config.appVersion||'?');
+  const mismatch=backendVersion!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:'';
+  return `${logo}<div><strong>${escapeHtml(name)}</strong><small>Versión ${escapeHtml(backendVersion)}${mismatch} · ${escapeHtml(config.environment || 'sin configurar')}</small></div>`;
 }
 
 function roleDisplayName(role) {
@@ -301,7 +304,7 @@ function shell(content, active = 'home') {
     </header>
     ${currentUser ? `<nav class="nav">${navMarkup(active)}</nav>` : ''}
     <main class="container">${content}</main>
-    <footer>Gestión Club ${escapeHtml(config.appVersion || '')} · entorno ${escapeHtml(config.environment || '')}</footer>`;
+    <footer>Gestión Club ${escapeHtml(config.appVersion || '')}${String(config.appVersion||'')!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:''} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
   if (logoutButton) logoutButton.onclick = logout;
   const seasonSelect=document.getElementById('global-season-select');if(seasonSelect)seasonSelect.onchange=()=>{resetSeasonScopedUi_(seasonSelect.value);rerenderForSeason_(active);};

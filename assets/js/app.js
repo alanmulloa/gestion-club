@@ -284,7 +284,6 @@ function dashboardCardsForRole() {
   if (['ADMIN','MANAGER','COACH'].includes(role)) cards.push(['Rendimiento','Estadísticas','Minutos, convocatorias, puntos, disciplina y resultados.','go-statistics','secondary']);
   if (['ADMIN','MANAGER','COACH','REFEREE','PLAYER','TUTOR','COLLABORATOR'].includes(role)) cards.push(['Archivos','Documentación','Consultá y gestioná la documentación a la que tenés acceso.','go-documents','secondary']);
   if (['ADMIN','MANAGER'].includes(role)) cards.push(['Acceso','Usuarios','Creación de cuentas, roles y accesos.','go-users','secondary']);
-  if (['ADMIN','MANAGER','TUTOR'].includes(role)) cards.push(['Familias','Tutores y menores','Relaciones entre menores y tutores autorizados.','go-families','secondary']);
   if (role==='ADMIN') cards.push(['Temporadas','Gestión de temporadas','Alta, activación y reglas deportivas por temporada.','go-seasons','secondary']);
   if (role==='ADMIN') cards.push(['Club','Configuración','Identidad, contacto, logo y colores del club.','go-settings','secondary']);
   return cards.map(c=>`<article class="quick-card role-card"><span class="eyebrow">${c[0]}</span><h2>${c[1]}</h2><p>${c[2]}</p><button class="button ${c[4]}" id="${c[3]}">${c[1]}</button></article>`).join('');
@@ -586,10 +585,14 @@ async function loadStructureData() {
 
 function structureTabs() {
   const tabs = [
-    ['people', 'Personas'], ['roles', 'Cargos'], ['divisions', 'Divisiones y equipos'], ['assignments', 'Asignaciones'], ['guardians', 'Tutores']
+    ['people', 'Personas'], ['roles', 'Cargos'], ['divisions', 'Divisiones y equipos'], ['assignments', 'Asignaciones']
   ];
   return `<div class="subnav">${tabs.map(([key, label]) => `<button type="button" class="subnav-link ${structureSection === key ? 'active' : ''}" data-structure-tab="${key}">${label}</button>`).join('')}</div>`;
 }
+
+function recommendedRoleCategories_(){return ['PLAYER','COACH','MANAGER','COORDINATOR','REFEREE','COLLABORATOR'];}
+function roleCategoryLabel_(category){return ({PLAYER:'Jugador',COACH:'Entrenador',MANAGER:'Manager / Delegado',COORDINATOR:'Coordinador',REFEREE:'Árbitro',COLLABORATOR:'Colaborador'})[category]||category||'—';}
+function normalizeEmailClient_(value){return String(value||'').trim().toLowerCase();}
 
 function optionList(items, valueKey, labelFn, selected = '', includeEmpty = true) {
   const empty = includeEmpty ? '<option value="">— Sin asignar —</option>' : '';
@@ -611,14 +614,13 @@ async function renderStructure(section = structureSection) {
   if (!['ADMIN', 'MANAGER'].includes(currentUser?.role)) {
     return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>Solo administradores y managers autorizados pueden gestionar la estructura.</p></section>', 'structure');
   }
-  try { await loadStructureData(); if (structureSection === 'guardians') { const familyResponse = await call('getFamilyData'); familyData = familyResponse.data; } }
+  try { await loadStructureData(); }
   catch (error) { return shell(`<section class="panel narrow"><h1>No se pudo cargar la estructura</h1><p>${escapeHtml(error.message)}</p></section>`, 'structure'); }
 
   let content = '';
   if (structureSection === 'people') content = renderPeopleSection();
   else if (structureSection === 'roles') content = renderRolesSection();
   else if (structureSection === 'divisions') content = renderDivisionsSection();
-  else if (structureSection === 'guardians') content = renderGuardiansSection();
   else content = renderAssignmentsSection();
 
   shell(`
@@ -641,15 +643,23 @@ function renderPeopleSection() {
   const people = structureData?.persons || [];
   const state=loadUiState_().peopleFilters||{};
   const query=textNorm_(state.q||''), status=state.status||'', divisionId=state.divisionId||'';
-  const playerRoleIds=new Set((structureData.roles||[]).filter(r=>r.category==='PLAYER').map(r=>r.roleId));
-  const personDivs={};(structureData.assignments||[]).forEach(a=>{if(a.status==='ACTIVE'&&a.divisionId&&playerRoleIds.has(a.roleId))(personDivs[a.personId]||(personDivs[a.personId]=new Set())).add(a.divisionId);});
+  const personDivs={};(structureData.assignments||[]).forEach(a=>{if(a.status==='ACTIVE'&&a.divisionId)(personDivs[a.personId]||(personDivs[a.personId]=new Set())).add(a.divisionId);});
   const filtered=people.filter(p=>(!query||textNorm_([p.displayName,p.email,p.phone].join(' ')).includes(query))&&(!status||p.status===status)&&(!divisionId||(personDivs[p.personId]&&personDivs[p.personId].has(divisionId))));
-  const roleById=Object.fromEntries((structureData.roles||[]).map(r=>[r.roleId,r])); const userByPerson=Object.fromEntries((structureData.userAccess||[]).map(u=>[u.personId,u]));
-  const rows = filtered.map(person => {const rnames=(structureData.assignments||[]).filter(a=>a.personId===person.personId&&a.status==='ACTIVE').map(a=>roleById[a.roleId]?.name).filter(Boolean);const u=userByPerson[person.personId];return `<tr><td><strong>${escapeHtml(person.displayName)}</strong><small>${escapeHtml(person.email || 'Sin correo')}</small></td><td>${escapeHtml([...new Set(rnames)].join(' · ')||'Sin cargos')}</td><td>${escapeHtml(person.phone || '—')}</td><td>${u?statusBadge(u.status):'<span class="badge inactive">Sin acceso</span>'}</td><td>${statusBadge(person.status)}</td><td><button class="button mini secondary" data-edit-person="${escapeHtml(person.personId)}">Editar</button>${!u&&person.email?`<button class="button mini primary" data-create-access="${escapeHtml(person.personId)}">Crear acceso</button>`:''}</td></tr>`;}).join('');
+  const roleById=Object.fromEntries((structureData.roles||[]).map(r=>[r.roleId,r]));
+  const linkedByPerson=Object.fromEntries((structureData.userAccess||[]).filter(u=>u.personId).map(u=>[u.personId,u]));
+  const unlinkedByEmail=Object.fromEntries((structureData.userAccess||[]).filter(u=>!u.personId&&u.email).map(u=>[normalizeEmailClient_(u.email),u]));
+  const rows = filtered.map(person => {
+    const assignments=(structureData.assignments||[]).filter(a=>a.personId===person.personId&&a.status==='ACTIVE');
+    const rnames=assignments.map(a=>roleById[a.roleId]?.name).filter(Boolean);
+    const u=linkedByPerson[person.personId],candidate=person.email?unlinkedByEmail[normalizeEmailClient_(person.email)]:null;
+    const access=u?statusBadge(u.status):(candidate?'<span class="badge pending">Cuenta por vincular</span>':'<span class="badge inactive">Sin acceso</span>');
+    const action=u?`<button class="button mini secondary" data-open-person="${escapeHtml(person.personId)}" data-person-tab="access">Gestionar acceso</button>`:(candidate?`<button class="button mini primary" data-link-access="${escapeHtml(person.personId)}" data-user-id="${escapeHtml(candidate.userId)}">Vincular acceso</button>`:(person.email?`<button class="button mini primary" data-create-access="${escapeHtml(person.personId)}">Crear acceso</button>`:''));
+    return `<tr><td><button class="person-link" data-open-person="${escapeHtml(person.personId)}"><strong>${escapeHtml(person.displayName)}</strong><small>${escapeHtml(person.email || 'Sin correo')}</small></button></td><td>${escapeHtml([...new Set(rnames)].join(' · ')||'Sin cargos')}</td><td>${escapeHtml(person.phone || '—')}</td><td>${access}</td><td>${statusBadge(person.status)}</td><td><button class="button mini secondary" data-open-person="${escapeHtml(person.personId)}">Abrir ficha</button>${action}</td></tr>`;
+  }).join('');
   const divisions=(structureData?.divisions||[]).filter(x=>x.status==='ACTIVE');
   return `<section class="panel management-panel">
-    <div class="panel-heading"><div><h2>Personas</h2><p>Registro único para jugadores, entrenadores, managers y colaboradores.</p></div><button class="button primary" id="new-person">Nueva persona</button></div>
-    <div class="filter-bar"><label class="filter-grow">Buscar<input id="people-filter-q" placeholder="Nombre, correo o teléfono" value="${escapeHtml(state.q||'')}"></label><label>División<select id="people-filter-division"><option value="">Todas</option>${divisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${d.divisionId===divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="people-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option></select></label><button class="button secondary filter-clear" id="people-filter-clear">Limpiar</button></div>
+    <div class="panel-heading"><div><h2>Personas</h2><p>La persona es el registro central: datos, club, familia, documentación y acceso se gestionan desde su ficha.</p></div><button class="button primary" id="new-person">Nueva persona</button></div>
+    <div class="filter-bar"><label class="filter-grow">Buscar<input id="people-filter-q" placeholder="Nombre, correo o teléfono" value="${escapeHtml(state.q||'')}"></label><label>División<select id="people-filter-division"><option value="">Todas</option>${divisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${d.divisionId===divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="people-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option><option value="ARCHIVED" ${status==='ARCHIVED'?'selected':''}>Archivados</option></select></label><button class="button secondary filter-clear" id="people-filter-clear">Limpiar</button></div>
     <p class="filter-count">${filtered.length} de ${people.length} personas</p>
     ${filtered.length ? `<div class="table-wrap"><table><thead><tr><th>Persona</th><th>Cargos</th><th>Teléfono</th><th>Acceso</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay personas que coincidan con los filtros.')}
     <div id="editor-host"></div>
@@ -657,10 +667,11 @@ function renderPeopleSection() {
 }
 
 function renderRolesSection() {
-  const roles = structureData?.roles || [];
-  const labels = { ADMIN:'Administrador', COACH:'Entrenador', MANAGER:'Manager', REFEREE:'Árbitro', COORDINATOR:'Coordinador', COLLABORATOR:'Colaborador', ADMINISTRATIVE:'Administrativo', PLAYER:'Jugador', OTHER:'Otro' };
-  const rows = roles.map(role => `<tr><td><strong>${escapeHtml(role.name)}</strong><small>${escapeHtml(role.description || '')}</small></td><td>${escapeHtml(labels[role.category] || role.category)}</td><td>${escapeHtml(role.scopeType)}</td><td>${statusBadge(role.status)}</td><td><button class="button mini secondary" data-edit-role="${escapeHtml(role.roleId)}">Editar</button></td></tr>`).join('');
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Cargos</h2><p>Los cargos son configurables y no equivalen automáticamente a permisos de seguridad.</p></div><button class="button primary" id="new-role">Nuevo cargo</button></div>${roles.length ? `<div class="table-wrap"><table><thead><tr><th>Cargo</th><th>Categoría</th><th>Alcance</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay cargos configurados.')}<div id="editor-host"></div></section>`;
+  const allRoles = structureData?.roles || [];
+  const categories=new Set(recommendedRoleCategories_());
+  const roles=allRoles.filter(r=>categories.has(r.category));
+  const rows = roles.map(role => `<tr><td><strong>${escapeHtml(role.name)}</strong><small>${escapeHtml(role.description || '')}</small></td><td>${escapeHtml(roleCategoryLabel_(role.category))}</td><td>${escapeHtml(role.scopeType==='DIVISION'?'División':role.scopeType==='TRANSVERSAL'?'Transversal':'Flexible')}</td><td>${statusBadge(role.status)}</td><td><button class="button mini secondary" data-edit-role="${escapeHtml(role.roleId)}">Editar</button></td></tr>`).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Cargos</h2><p>Catálogo simplificado de funciones del club. Administrador del sistema no es un cargo: se gestiona en Usuarios.</p></div><button class="button primary" id="new-role">Nuevo cargo</button></div><div class="info-strip"><strong>Categorías recomendadas:</strong> Jugador · Entrenador · Manager/Delegado · Coordinador · Árbitro · Colaborador.</div>${roles.length ? `<div class="table-wrap"><table><thead><tr><th>Cargo</th><th>Categoría</th><th>Alcance</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay cargos configurados.')}<div id="editor-host"></div></section>`;
 }
 
 function renderDivisionsSection() {
@@ -685,8 +696,13 @@ function renderAssignmentsSection() {
   const people = Object.fromEntries((data.persons || []).map(x => [x.personId, x]));
   const roles = Object.fromEntries((data.roles || []).map(x => [x.roleId, x]));
   const divisions = Object.fromEntries((data.divisions || []).map(x => [x.divisionId, x]));
-  const rows = (data.assignments || []).map(item => `<tr><td><strong>${escapeHtml(people[item.personId]?.displayName || '—')}</strong><small>${escapeHtml(roles[item.roleId]?.name || '—')}</small></td><td>${escapeHtml(divisions[item.divisionId]?.name || 'Transversal')}</td><td>${escapeHtml(item.startDate || '—')}${item.endDate ? ' → ' + escapeHtml(item.endDate) : ''}</td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-assignment="${escapeHtml(item.assignmentId)}">Editar</button></td></tr>`).join('');
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Relacioná personas con uno o varios cargos y divisiones. Dejá División vacía para cargos transversales. Los equipos A/B no forman parte de la asignación.</p></div><button class="button primary" id="new-assignment">Nueva asignación</button></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay asignaciones.')}<div id="editor-host"></div></section>`;
+  const state=loadUiState_().assignmentFilters||{},q=textNorm_(state.q||''),roleId=state.roleId||'',divisionId=state.divisionId||'',status=state.status||'';
+  const filtered=(data.assignments||[]).filter(a=>{const p=people[a.personId]||{},r=roles[a.roleId]||{};return (!q||textNorm_([p.displayName,r.name].join(' ')).includes(q))&&(!roleId||a.roleId===roleId)&&(!divisionId||(divisionId==='TRANSVERSAL'?!a.divisionId:a.divisionId===divisionId))&&(!status||a.status===status);});
+  const rows = filtered.map(item => `<tr><td><strong>${escapeHtml(people[item.personId]?.displayName || '—')}</strong><small>${escapeHtml(roles[item.roleId]?.name || '—')}</small></td><td>${escapeHtml(divisions[item.divisionId]?.name || 'Transversal')}</td><td>${item.startDate||item.endDate?`${escapeHtml(item.startDate || '—')}${item.endDate ? ' → ' + escapeHtml(item.endDate) : ''}`:'<span class="muted">Toda la temporada</span>'}</td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-assignment="${escapeHtml(item.assignmentId)}">Editar</button></td></tr>`).join('');
+  const activeRoles=(data.roles||[]).filter(r=>r.status==='ACTIVE'&&recommendedRoleCategories_().includes(r.category));
+  const activeDivisions=(data.divisions||[]).filter(d=>d.status==='ACTIVE');
+  const seasons=(data.seasons||[]).filter(x=>x.seasonId!==data.selectedSeasonId).sort((a,b)=>String(b.startDate||'').localeCompare(String(a.startDate||'')));
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Persona + cargo + división + temporada. El alcance del cargo evita combinaciones incoherentes y se controlan duplicados.</p></div><div class="button-row"><button class="button secondary" id="copy-assignments" ${seasons.length?'':'disabled'}>Copiar temporada anterior</button><button class="button primary" id="new-assignment">Nueva asignación</button></div></div><div class="filter-bar"><label class="filter-grow">Buscar<input id="assignment-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Persona o cargo"></label><label>Cargo<select id="assignment-filter-role"><option value="">Todos</option>${activeRoles.map(r=>`<option value="${escapeHtml(r.roleId)}" ${roleId===r.roleId?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select></label><label>División<select id="assignment-filter-division"><option value="">Todas</option><option value="TRANSVERSAL" ${divisionId==='TRANSVERSAL'?'selected':''}>Transversal</option>${activeDivisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="assignment-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activas</option><option value="ENDED" ${status==='ENDED'?'selected':''}>Finalizadas</option></select></label><button class="button secondary filter-clear" id="assignment-filter-clear">Limpiar</button></div><p class="filter-count">${filtered.length} de ${(data.assignments||[]).length} asignaciones</p>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay asignaciones que coincidan con los filtros.')}<div id="editor-host"></div></section>`;
 }
 
 function renderGuardiansSection() {
@@ -704,6 +720,17 @@ function wireStructureSection() {
   document.getElementById('new-division')?.addEventListener('click', () => showDivisionEditor());
   document.getElementById('new-assignment')?.addEventListener('click', () => showAssignmentEditor());
   bind('[data-create-access]', data => renderUsers(data.createAccess));
+  bind('[data-open-person]', data => openPersonProfile_(data.openPerson,data.personTab||'club'));
+  bind('[data-link-access]', async data => {
+    if(!confirm('Se vinculará la cuenta existente con esta Persona. No se modificará la contraseña. ¿Continuar?'))return;
+    try{
+      await call('linkUserToPerson',{personId:data.linkAccess,userId:data.userId});
+      const linkedUser=(structureData?.userAccess||[]).find(u=>u.userId===data.userId);
+      if(normalizeEmailClient_(currentUser?.email)===normalizeEmailClient_(linkedUser?.email||'')) currentUser.personId=data.linkAccess;
+      showToast_('Cuenta vinculada a la Persona.');
+      await loadStructureData(); await renderStructure('people');
+    }catch(err){showMessage(err.message,'error','structure-message');}
+  });
   bind('[data-edit-person]', data => showPersonEditor((structureData.persons || []).find(x => x.personId === data.editPerson)));
   bind('[data-edit-role]', data => showRoleEditor((structureData.roles || []).find(x => x.roleId === data.editRole)));
   bind('[data-edit-division]', data => showDivisionEditor((structureData.divisions || []).find(x => x.divisionId === data.editDivision)));
@@ -717,10 +744,21 @@ function wireStructureSection() {
     document.getElementById('people-filter-division')?.addEventListener('change',apply);
     document.getElementById('people-filter-status')?.addEventListener('change',apply);
     document.getElementById('people-filter-clear')?.addEventListener('click',()=>{saveUiStatePatch_({peopleFilters:{}});renderStructure('people');});
-  }  if(structureSection==='guardians'){
-    const applyGuardian=()=>{saveUiStatePatch_({guardianFilters:{q:val('guardian-filter-q'),status:val('guardian-filter-status'),docs:val('guardian-filter-docs')}});renderStructure('guardians');};
-    document.getElementById('guardian-filter-q')?.addEventListener('change',applyGuardian);document.getElementById('guardian-filter-q')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applyGuardian();}});document.getElementById('guardian-filter-status')?.addEventListener('change',applyGuardian);document.getElementById('guardian-filter-docs')?.addEventListener('change',applyGuardian);document.getElementById('guardian-filter-clear')?.addEventListener('click',()=>{saveUiStatePatch_({guardianFilters:{}});renderStructure('guardians');});
-    const gf=document.getElementById('guardian-structure-form');if(gf)gf.onsubmit=async e=>{e.preventDefault();try{await call('saveGuardianRelation',{childPersonId:val('guardian-child'),guardianPersonId:val('guardian-adult'),relationshipType:val('guardian-type'),status:val('guardian-status'),canManageDocuments:document.getElementById('guardian-docs').checked,notes:val('guardian-notes')});showToast_('Relación guardada.');await renderStructure('guardians');}catch(err){showMessage(err.message,'error','structure-message');}};
+  }
+  if(structureSection==='assignments'){
+    const applyAssignments=()=>{saveUiStatePatch_({assignmentFilters:{q:val('assignment-filter-q'),roleId:val('assignment-filter-role'),divisionId:val('assignment-filter-division'),status:val('assignment-filter-status')}});renderStructure('assignments');};
+    ['assignment-filter-role','assignment-filter-division','assignment-filter-status'].forEach(id=>document.getElementById(id)?.addEventListener('change',applyAssignments));
+    document.getElementById('assignment-filter-q')?.addEventListener('change',applyAssignments);
+    document.getElementById('assignment-filter-q')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applyAssignments();}});
+    document.getElementById('assignment-filter-clear')?.addEventListener('click',()=>{saveUiStatePatch_({assignmentFilters:{}});renderStructure('assignments');});
+    document.getElementById('copy-assignments')?.addEventListener('click',async()=>{
+      const target=structureData.selectedSeasonId||selectedSeasonId_();
+      const seasons=(structureData.seasons||[]).filter(x=>x.seasonId!==target).sort((a,b)=>String(b.startDate||'').localeCompare(String(a.startDate||'')));
+      if(!seasons.length)return;
+      const suggested=seasons[0];
+      if(!confirm(`Copiar asignaciones activas de ${suggested.name} a la temporada seleccionada? Las existentes no se duplicarán.`))return;
+      try{const res=(await call('copyAssignmentsFromSeason',{sourceSeasonId:suggested.seasonId,targetSeasonId:target})).data;showToast_(`${res.created} asignaciones copiadas · ${res.skipped} omitidas.`);await renderStructure('assignments');}catch(err){showMessage(err.message,'error','structure-message');}
+    });
   }
 }
 
@@ -741,12 +779,70 @@ function showPersonEditor(person = {}) {
   document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'savePerson', { personId: person.personId || '', firstName: val('person-first'), lastName: val('person-last'), email: val('person-email'), phone: val('person-phone'), birthDate: val('person-birth'), status: val('person-status'), notes: val('person-notes') });
 }
 
+function isMinorClient_(birthDate){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(birthDate||'')))return false;
+  const b=new Date(String(birthDate)+'T12:00:00'),today=new Date();let age=today.getFullYear()-b.getFullYear();if((today.getMonth()<b.getMonth())||(today.getMonth()===b.getMonth()&&today.getDate()<b.getDate()))age--;return age<18;
+}
+
+async function openPersonProfile_(personId,tab='club'){
+  const host=document.getElementById('editor-host'),person=(structureData?.persons||[]).find(x=>x.personId===personId);if(!host||!person)return;
+  host.innerHTML='<section class="inline-editor"><p>Cargando ficha de la persona…</p></section>';host.scrollIntoView({behavior:'smooth',block:'start'});
+  try{
+    const [familyResponse,documentsResponse]=await Promise.all([call('getFamilyData'),call('getDocumentsData')]);
+    renderPersonProfile_({person,family:familyResponse.data||{},documents:documentsResponse.data||{}},tab);
+  }catch(err){host.innerHTML=`<section class="inline-editor"><div class="editor-heading"><h3>${escapeHtml(person.displayName)}</h3><button class="button link" id="close-person-profile">Cerrar</button></div><div class="message error">${escapeHtml(err.message)}</div></section>`;document.getElementById('close-person-profile').onclick=()=>host.innerHTML='';}
+}
+
+function renderPersonProfile_(profile,tab){
+  const host=document.getElementById('editor-host'),person=profile.person;if(!host)return;
+  const tabs=[['data','Datos'],['club','Club'],['family','Familia'],['documents','Documentos'],['access','Acceso']];
+  const roles=Object.fromEntries((structureData.roles||[]).map(x=>[x.roleId,x])),divisions=Object.fromEntries((structureData.divisions||[]).map(x=>[x.divisionId,x]));
+  let body='';
+  if(tab==='data'){
+    body=`<div class="profile-grid"><div><span>Nombre</span><strong>${escapeHtml(person.displayName)}</strong></div><div><span>Correo</span><strong>${escapeHtml(person.email||'—')}</strong></div><div><span>Teléfono</span><strong>${escapeHtml(person.phone||'—')}</strong></div><div><span>Nacimiento</span><strong>${escapeHtml(person.birthDate||'—')}</strong></div><div><span>Estado</span>${statusBadge(person.status)}</div></div><div class="editor-actions"><button class="button secondary" id="profile-edit-person">Editar datos</button></div>`;
+  }else if(tab==='club'){
+    const assignments=(structureData.assignments||[]).filter(a=>a.personId===person.personId);
+    body=assignments.length?`<div class="table-wrap"><table><thead><tr><th>Cargo</th><th>División</th><th>Estado</th><th></th></tr></thead><tbody>${assignments.map(a=>`<tr><td>${escapeHtml(roles[a.roleId]?.name||'—')}</td><td>${escapeHtml(divisions[a.divisionId]?.name||'Transversal')}</td><td>${statusBadge(a.status)}</td><td><button class="button mini secondary" data-profile-edit-assignment="${escapeHtml(a.assignmentId)}">Editar</button></td></tr>`).join('')}</tbody></table></div>`:emptyTable('No tiene asignaciones en esta temporada.');
+    body+=`<div class="editor-actions"><button class="button primary" id="profile-new-assignment">Añadir cargo / división</button></div>`;
+  }else if(tab==='family'){
+    const people=profile.family.persons||[],rels=profile.family.relations||[],byId=Object.fromEntries(people.map(p=>[p.personId,p])),minor=isMinorClient_(person.birthDate);
+    const own=rels.filter(r=>r.childPersonId===person.personId||r.guardianPersonId===person.personId);
+    body=own.length?`<div class="table-wrap"><table><thead><tr><th>${minor?'Tutor':'Persona vinculada'}</th><th>Relación</th><th>Estado</th><th>Documentos</th></tr></thead><tbody>${own.map(r=>{const other=r.childPersonId===person.personId?byId[r.guardianPersonId]:byId[r.childPersonId];return `<tr><td><strong>${escapeHtml(other?.displayName||'—')}</strong><small>${escapeHtml([other?.email,other?.phone].filter(Boolean).join(' · '))}</small></td><td>${escapeHtml(r.relationshipType||'—')}</td><td>${statusBadge(r.status)}</td><td>${r.canManageDocuments==='TRUE'?'Sí':'No'}</td></tr>`;}).join('')}</tbody></table></div>`:emptyTable(minor?'No tiene tutores vinculados.':'No tiene menores vinculados.');
+    const candidates=minor?people.filter(p=>p.personId!==person.personId&&!isMinorClient_(p.birthDate)):people.filter(p=>p.personId!==person.personId&&isMinorClient_(p.birthDate));
+    body+=candidates.length?`<div class="section-divider"></div><form id="profile-family-form" class="form-grid two"><label>${minor?'Tutor':'Menor'}<select id="profile-family-person" required>${optionList(candidates,'personId',p=>p.displayName,'',false)}</select></label><label>Relación<input id="profile-family-type" value="PADRE/MADRE" maxlength="50"></label><label class="check-row"><input id="profile-family-docs" type="checkbox" checked> Puede gestionar documentación</label><div><button class="button primary" type="submit">Añadir relación</button></div></form>`:'<p class="muted">No hay personas compatibles para añadir una relación.</p>';
+  }else if(tab==='documents'){
+    const docs=(profile.documents.documents||[]).filter(d=>d.personId===person.personId),types=Object.fromEntries((profile.documents.documentTypes||[]).map(t=>[t.documentTypeId,t]));
+    body=docs.length?`<div class="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Vence</th></tr></thead><tbody>${docs.map(d=>`<tr><td><strong>${escapeHtml(types[d.documentTypeId]?.name||d.documentTypeId)}</strong><small>${escapeHtml(d.originalName||'')}</small></td><td>${statusBadge(d.status)}</td><td>${escapeHtml(d.expiryDate||'—')}</td></tr>`).join('')}</tbody></table></div>`:emptyTable('No tiene documentación cargada.');
+    body+=`<div class="editor-actions"><button class="button primary" id="profile-manage-documents">Gestionar documentación</button></div>`;
+  }else{
+    const linked=(structureData.userAccess||[]).find(u=>u.personId===person.personId),candidate=!linked&&person.email?(structureData.userAccess||[]).find(u=>!u.personId&&normalizeEmailClient_(u.email)===normalizeEmailClient_(person.email)):null;
+    if(linked) body=`<div class="profile-grid"><div><span>Cuenta</span><strong>${escapeHtml(linked.email)}</strong></div><div><span>Rol de seguridad</span><strong>${escapeHtml(linked.securityRole)}</strong></div><div><span>Estado</span>${statusBadge(linked.status)}</div><div><span>Último acceso</span><strong>${escapeHtml(linked.lastLoginAt||'Nunca')}</strong></div></div><div class="editor-actions"><button class="button secondary" id="profile-manage-access">Gestionar usuario</button></div>`;
+    else if(candidate) body=`<div class="info-strip"><strong>Cuenta existente detectada.</strong> ${escapeHtml(candidate.email)} todavía no está vinculada a ninguna Persona.</div><div class="editor-actions"><button class="button primary" id="profile-link-access" data-user-id="${escapeHtml(candidate.userId)}">Vincular cuenta existente</button></div>`;
+    else body=`${person.email?'<p>No hay una cuenta vinculada a esta Persona.</p>':'<div class="message warning">Añadí un correo a la Persona antes de crear acceso.</div>'}<div class="editor-actions">${person.email?'<button class="button primary" id="profile-create-access">Crear acceso</button>':''}</div>`;
+  }
+  host.innerHTML=`<section class="inline-editor person-profile"><div class="editor-heading"><div><span class="eyebrow">Ficha de persona</span><h3>${escapeHtml(person.displayName)}</h3><p>${escapeHtml([person.email,person.phone].filter(Boolean).join(' · ')||'Sin datos de contacto')}</p></div><button type="button" class="button link" id="close-person-profile">Cerrar</button></div><div class="subnav profile-subnav">${tabs.map(([key,label])=>`<button type="button" class="subnav-link ${tab===key?'active':''}" data-profile-tab="${key}">${label}</button>`).join('')}</div><div class="profile-tab-body">${body}</div><div id="profile-message" class="message"></div></section>`;
+  document.getElementById('close-person-profile').onclick=()=>host.innerHTML='';
+  document.querySelectorAll('[data-profile-tab]').forEach(b=>b.onclick=()=>renderPersonProfile_(profile,b.dataset.profileTab));
+  document.getElementById('profile-edit-person')?.addEventListener('click',()=>showPersonEditor(person));
+  document.getElementById('profile-new-assignment')?.addEventListener('click',()=>showAssignmentEditor({personId:person.personId,status:'ACTIVE'}));
+  document.querySelectorAll('[data-profile-edit-assignment]').forEach(b=>b.onclick=()=>showAssignmentEditor((structureData.assignments||[]).find(a=>a.assignmentId===b.dataset.profileEditAssignment)));
+  document.getElementById('profile-manage-documents')?.addEventListener('click',()=>{saveUiStatePatch_({documentFilters:{personId:person.personId}});renderDocuments();});
+  document.getElementById('profile-manage-access')?.addEventListener('click',()=>renderUsers(person.personId));
+  document.getElementById('profile-create-access')?.addEventListener('click',()=>renderUsers(person.personId));
+  const link=document.getElementById('profile-link-access');if(link)link.onclick=async()=>{try{const linkedUser=(structureData?.userAccess||[]).find(u=>u.userId===link.dataset.userId);await call('linkUserToPerson',{personId:person.personId,userId:link.dataset.userId});if(normalizeEmailClient_(currentUser?.email)===normalizeEmailClient_(linkedUser?.email||''))currentUser.personId=person.personId;showToast_('Cuenta vinculada.');await loadStructureData();await openPersonProfile_(person.personId,'access');}catch(err){showMessage(err.message,'error','profile-message');}};
+  const ff=document.getElementById('profile-family-form');if(ff)ff.onsubmit=async e=>{e.preventDefault();const minor=isMinorClient_(person.birthDate),other=val('profile-family-person');try{await call('saveGuardianRelation',{childPersonId:minor?person.personId:other,guardianPersonId:minor?other:person.personId,relationshipType:val('profile-family-type'),status:'ACTIVE',canManageDocuments:document.getElementById('profile-family-docs').checked});showToast_('Relación familiar guardada.');await openPersonProfile_(person.personId,'family');}catch(err){showMessage(err.message,'error','profile-message');}};
+  host.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
 function showRoleEditor(role = {}) {
-  editorShell(role.roleId ? 'Editar cargo' : 'Nuevo cargo', 'El alcance orienta dónde puede aplicarse, pero una asignación puede seguir siendo transversal.', `
+  editorShell(role.roleId ? 'Editar cargo' : 'Nuevo cargo', 'Definí la función organizativa y su alcance. Los permisos de administrador del sistema se gestionan exclusivamente desde Usuarios.', `
     <label>Nombre del cargo<input id="role-name" maxlength="100" required value="${escapeHtml(role.name || '')}"></label>
-    <div class="form-grid two"><label>Categoría<select id="role-category">${[['ADMIN','Administrador'],['COACH','Entrenador'],['MANAGER','Manager'],['REFEREE','Árbitro'],['COORDINATOR','Coordinador'],['COLLABORATOR','Colaborador'],['ADMINISTRATIVE','Administrativo'],['PLAYER','Jugador'],['OTHER','Otro']].map(([v,l]) => `<option value="${v}" ${role.category===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Alcance<select id="role-scope">${[['FLEXIBLE','Flexible'],['TRANSVERSAL','Transversal'],['DIVISION','División']].map(([v,l]) => `<option value="${v}" ${role.scopeType===v?'selected':''}>${l}</option>`).join('')}</select></label></div>
+    <div class="form-grid two"><label>Categoría<select id="role-category">${[['PLAYER','Jugador'],['COACH','Entrenador'],['MANAGER','Manager / Delegado'],['COORDINATOR','Coordinador'],['REFEREE','Árbitro'],['COLLABORATOR','Colaborador']].map(([v,l]) => `<option value="${v}" ${role.category===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Alcance<select id="role-scope">${[['FLEXIBLE','Flexible'],['TRANSVERSAL','Transversal'],['DIVISION','División']].map(([v,l]) => `<option value="${v}" ${role.scopeType===v?'selected':''}>${l}</option>`).join('')}</select></label></div>
+    <div class="info-strip" id="role-scope-help"></div>
     <label>Descripción<textarea id="role-description" maxlength="300" rows="3">${escapeHtml(role.description || '')}</textarea></label>
     <label>Estado<select id="role-status"><option value="ACTIVE" ${role.status !== 'INACTIVE' ? 'selected' : ''}>Activo</option><option value="INACTIVE" ${role.status === 'INACTIVE' ? 'selected' : ''}>Inactivo</option></select></label>`);
+  const sync=()=>{const cat=val('role-category'),scope=document.getElementById('role-scope'),help=document.getElementById('role-scope-help');if(cat==='PLAYER'){scope.value='DIVISION';scope.disabled=true;help.textContent='Jugador: siempre se asigna a una división.';}else if(cat==='REFEREE'||cat==='COLLABORATOR'){scope.value='TRANSVERSAL';scope.disabled=true;help.textContent='Este cargo es transversal y no requiere división.';}else{scope.disabled=false;help.textContent='Entrenador, Manager/Delegado y Coordinador pueden ser de una división o transversales.';}};
+  document.getElementById('role-category').onchange=sync;sync();
   document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveRole', { roleId: role.roleId || '', name: val('role-name'), category: val('role-category'), scopeType: val('role-scope'), description: val('role-description'), status: val('role-status') });
 }
 
@@ -763,12 +859,17 @@ function showTeamEditor(item = {}) {
   document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveTeam', { teamId: item.teamId || '', seasonId: item.seasonId || structureData.selectedSeasonId || structureData.activeSeasonId || selectedSeasonId_(), divisionId: val('team-division'), name: val('team-name'), code: val('team-code'), displayPattern: val('team-pattern'), status: val('team-status') });
 }
 
+function assignmentRuleClient_(role){
+  if(!role)return 'OPTIONAL';if(role.category==='PLAYER'||role.scopeType==='DIVISION')return 'REQUIRED';if(['REFEREE','COLLABORATOR'].includes(role.category)||role.scopeType==='TRANSVERSAL')return 'FORBIDDEN';return 'OPTIONAL';
+}
 function showAssignmentEditor(item = {}) {
   const activePeople = (structureData.persons || []).filter(x => x.status === 'ACTIVE' || x.personId === item.personId);
-  const activeRoles = (structureData.roles || []).filter(x => x.status === 'ACTIVE' || x.roleId === item.roleId);
+  const activeRoles = (structureData.roles || []).filter(x => x.roleId === item.roleId || (x.status === 'ACTIVE' && recommendedRoleCategories_().includes(x.category)));
   const activeDivisions = (structureData.divisions || []).filter(x => x.status === 'ACTIVE' || x.divisionId === item.divisionId);
-  editorShell(item.assignmentId ? 'Editar asignación' : 'Nueva asignación', 'Una persona puede tener varios cargos y varias divisiones. A/B se decide en cada partido, no aquí.', `<div class="form-grid two"><label>Persona<select id="assignment-person" required>${optionList(activePeople,'personId',x=>x.displayName,item.personId||'',false)}</select></label><label>Cargo<select id="assignment-role" required>${optionList(activeRoles,'roleId',x=>x.name,item.roleId||'',false)}</select></label></div><label>División<select id="assignment-division">${optionList(activeDivisions,'divisionId',x=>x.name,item.divisionId||'')}</select><small>Vacía = función transversal.</small></label><div class="form-grid two"><label>Desde<input id="assignment-start" type="date" value="${escapeHtml(item.startDate || '')}"></label><label>Hasta<input id="assignment-end" type="date" value="${escapeHtml(item.endDate || '')}"></label></div><label>Estado<select id="assignment-status"><option value="ACTIVE" ${item.status !== 'ENDED' ? 'selected' : ''}>Activa</option><option value="ENDED" ${item.status === 'ENDED' ? 'selected' : ''}>Finalizada</option></select></label><label>Notas<textarea id="assignment-notes" maxlength="500" rows="3">${escapeHtml(item.notes || '')}</textarea></label>`);
-  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: val('assignment-division'), seasonId: item.seasonId || structureData.selectedSeasonId || structureData.activeSeasonId || selectedSeasonId_(), startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
+  editorShell(item.assignmentId ? 'Editar asignación' : 'Nueva asignación', 'La asignación pertenece a la temporada seleccionada. A/B se decide en cada partido, no en la persona.', `<div class="form-grid two"><label>Persona<select id="assignment-person" required>${optionList(activePeople,'personId',x=>x.displayName,item.personId||'',false)}</select></label><label>Cargo<select id="assignment-role" required>${optionList(activeRoles,'roleId',x=>x.name,item.roleId||'',false)}</select></label></div><label id="assignment-division-wrap">División<select id="assignment-division">${optionList(activeDivisions,'divisionId',x=>x.name,item.divisionId||'')}</select><small id="assignment-scope-help"></small></label><details class="advanced-fields"><summary>Vigencia y notas (opcional)</summary><div class="form-grid two"><label>Desde<input id="assignment-start" type="date" value="${escapeHtml(item.startDate || '')}"></label><label>Hasta<input id="assignment-end" type="date" value="${escapeHtml(item.endDate || '')}"></label></div><label>Notas<textarea id="assignment-notes" maxlength="500" rows="3">${escapeHtml(item.notes || '')}</textarea></label></details><label>Estado<select id="assignment-status"><option value="ACTIVE" ${item.status !== 'ENDED' ? 'selected' : ''}>Activa</option><option value="ENDED" ${item.status === 'ENDED' ? 'selected' : ''}>Finalizada</option></select></label>`);
+  const syncScope=()=>{const role=activeRoles.find(r=>r.roleId===val('assignment-role')),rule=assignmentRuleClient_(role),select=document.getElementById('assignment-division'),wrap=document.getElementById('assignment-division-wrap'),help=document.getElementById('assignment-scope-help');if(rule==='FORBIDDEN'){select.value='';select.disabled=true;wrap.classList.add('is-disabled');help.textContent='Cargo transversal: no se asigna división.';}else{select.disabled=false;wrap.classList.remove('is-disabled');if(rule==='REQUIRED')help.textContent='Este cargo requiere una división.';else help.textContent='Podés elegir una división o dejarlo transversal.';}};
+  document.getElementById('assignment-role').onchange=syncScope;syncScope();
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: document.getElementById('assignment-division').disabled?'':val('assignment-division'), seasonId: item.seasonId || structureData.selectedSeasonId || structureData.activeSeasonId || selectedSeasonId_(), startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
 }
 
 function val(id) { return document.getElementById(id)?.value?.trim?.() ?? document.getElementById(id)?.value ?? ''; }
@@ -1041,7 +1142,7 @@ async function renderUsers(preselectedPersonId=''){
     const st=loadUiState_().userFilters||{}, q=textNorm_(st.q||''), status=st.status||'', role=st.role||'';
     const filtered=users.filter(u=>(!q||textNorm_([u.email,personNameById(people,u.personId)].join(' ')).includes(q))&&(!status||u.status===status)&&(!role||u.securityRole===role));
     const rows=filtered.map(u=>`<tr><td><strong>${escapeHtml(u.email)}</strong><small>${escapeHtml(personNameById(people,u.personId))}</small></td><td><strong>${escapeHtml(u.securityRole)}</strong><small>${escapeHtml((u.accessRoles||[]).join(' · ')||'—')}</small></td><td>${statusBadge(u.status)}</td><td>${escapeHtml(u.lastLoginAt||'Nunca')}</td><td><button class="button mini secondary" data-reset-user="${u.userId}">Reset</button><button class="button mini secondary" data-toggle-user="${u.userId}" data-status="${u.status}" data-role="${u.securityRole}">${u.status==='ACTIVE'?'Desactivar':'Activar'}</button></td></tr>`).join('');
-    shell(`<section class="hero compact"><span class="eyebrow">Accesos</span><h1>Usuarios y permisos</h1><p>La cuenta se vincula a una Persona. El rol de acceso efectivo se deriva de sus cargos activos; una persona puede tener varios cargos.</p></section>
+    shell(`<section class="hero compact"><span class="eyebrow">Accesos</span><h1>Usuarios y permisos</h1><p>La cuenta se vincula a una Persona. Los accesos operativos se derivan de sus cargos activos; ADMIN es un permiso explícito del sistema y se conserva al vincular la cuenta.</p></section>
     <section class="panel"><div class="panel-heading"><div><h2>Cuentas</h2></div></div><div class="filter-bar"><label class="filter-grow">Buscar<input id="user-filter-q" placeholder="Nombre o correo" value="${escapeHtml(st.q||'')}"></label><label>Rol<select id="user-filter-role"><option value="">Todos</option>${roles.map(r=>`<option value="${r}" ${role===r?'selected':''}>${r}</option>`).join('')}</select></label><label>Estado<select id="user-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="DISABLED" ${status==='DISABLED'?'selected':''}>Desactivados</option><option value="LOCKED" ${status==='LOCKED'?'selected':''}>Bloqueados</option></select></label><button class="button secondary filter-clear" id="user-filter-clear">Limpiar</button></div><p class="filter-count">${filtered.length} de ${users.length} usuarios</p>${filtered.length?`<div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay usuarios que coincidan con los filtros.')}
     <form id="user-form" class="form-grid two" style="margin-top:1rem">
       <label>Persona<select id="user-person" required>${optionList(people,'personId',p=>p.displayName,preselectedPersonId||'',false)}</select></label><label>Correo<input id="user-email" type="email" required></label><label>Cargos / acceso<input id="user-derived-roles" readonly placeholder="Se deriva de los cargos activos"></label>

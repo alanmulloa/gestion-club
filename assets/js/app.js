@@ -534,7 +534,7 @@ async function loadStructureData() {
 
 function structureTabs() {
   const tabs = [
-    ['people', 'Personas'], ['roles', 'Cargos'], ['divisions', 'Divisiones'], ['teams', 'Equipos'], ['assignments', 'Asignaciones'], ['guardians', 'Tutores']
+    ['people', 'Personas'], ['roles', 'Cargos'], ['divisions', 'Divisiones y equipos'], ['assignments', 'Asignaciones'], ['guardians', 'Tutores']
   ];
   return `<div class="subnav">${tabs.map(([key, label]) => `<button type="button" class="subnav-link ${structureSection === key ? 'active' : ''}" data-structure-tab="${key}">${label}</button>`).join('')}</div>`;
 }
@@ -566,7 +566,6 @@ async function renderStructure(section = structureSection) {
   if (structureSection === 'people') content = renderPeopleSection();
   else if (structureSection === 'roles') content = renderRolesSection();
   else if (structureSection === 'divisions') content = renderDivisionsSection();
-  else if (structureSection === 'teams') content = renderTeamsSection();
   else if (structureSection === 'guardians') content = renderGuardiansSection();
   else content = renderAssignmentsSection();
 
@@ -574,7 +573,7 @@ async function renderStructure(section = structureSection) {
     <section class="hero compact">
       <span class="eyebrow">Estructura deportiva</span>
       <h1>Personas y organización</h1>
-      <p>Una persona puede tener varios cargos y participar en distintas divisiones o equipos sin duplicarse.</p>
+      <p>Una persona puede tener varios cargos y participar en varias divisiones sin duplicarse. Los equipos A/B se gestionan dentro de cada división.</p>
     </section>
     ${structureTabs()}
     ${content}
@@ -593,34 +592,33 @@ function renderPeopleSection() {
   const playerRoleIds=new Set((structureData.roles||[]).filter(r=>r.category==='PLAYER').map(r=>r.roleId));
   const personDivs={};(structureData.assignments||[]).forEach(a=>{if(a.status==='ACTIVE'&&a.divisionId&&playerRoleIds.has(a.roleId))(personDivs[a.personId]||(personDivs[a.personId]=new Set())).add(a.divisionId);});
   const filtered=people.filter(p=>(!query||textNorm_([p.displayName,p.email,p.phone].join(' ')).includes(query))&&(!status||p.status===status)&&(!divisionId||(personDivs[p.personId]&&personDivs[p.personId].has(divisionId))));
-  const rows = filtered.map(person => `<tr>
-    <td><strong>${escapeHtml(person.displayName)}</strong><small>${escapeHtml(person.email || 'Sin correo')}</small></td>
-    <td>${escapeHtml(person.phone || '—')}</td>
-    <td>${escapeHtml(person.birthDate || '—')}</td>
-    <td>${statusBadge(person.status)}</td>
-    <td><button class="button mini secondary" data-edit-person="${escapeHtml(person.personId)}">Editar</button></td>
-  </tr>`).join('');
+  const roleById=Object.fromEntries((structureData.roles||[]).map(r=>[r.roleId,r])); const userByPerson=Object.fromEntries((structureData.userAccess||[]).map(u=>[u.personId,u]));
+  const rows = filtered.map(person => {const rnames=(structureData.assignments||[]).filter(a=>a.personId===person.personId&&a.status==='ACTIVE').map(a=>roleById[a.roleId]?.name).filter(Boolean);const u=userByPerson[person.personId];return `<tr><td><strong>${escapeHtml(person.displayName)}</strong><small>${escapeHtml(person.email || 'Sin correo')}</small></td><td>${escapeHtml([...new Set(rnames)].join(' · ')||'Sin cargos')}</td><td>${escapeHtml(person.phone || '—')}</td><td>${u?statusBadge(u.status):'<span class="badge inactive">Sin acceso</span>'}</td><td>${statusBadge(person.status)}</td><td><button class="button mini secondary" data-edit-person="${escapeHtml(person.personId)}">Editar</button>${!u&&person.email?`<button class="button mini primary" data-create-access="${escapeHtml(person.personId)}">Crear acceso</button>`:''}</td></tr>`;}).join('');
   const divisions=(structureData?.divisions||[]).filter(x=>x.status==='ACTIVE');
   return `<section class="panel management-panel">
     <div class="panel-heading"><div><h2>Personas</h2><p>Registro único para jugadores, entrenadores, managers y colaboradores.</p></div><button class="button primary" id="new-person">Nueva persona</button></div>
     <div class="filter-bar"><label class="filter-grow">Buscar<input id="people-filter-q" placeholder="Nombre, correo o teléfono" value="${escapeHtml(state.q||'')}"></label><label>División<select id="people-filter-division"><option value="">Todas</option>${divisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${d.divisionId===divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="people-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option></select></label><button class="button secondary filter-clear" id="people-filter-clear">Limpiar</button></div>
     <p class="filter-count">${filtered.length} de ${people.length} personas</p>
-    ${filtered.length ? `<div class="table-wrap"><table><thead><tr><th>Persona</th><th>Teléfono</th><th>Nacimiento</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay personas que coincidan con los filtros.')}
+    ${filtered.length ? `<div class="table-wrap"><table><thead><tr><th>Persona</th><th>Cargos</th><th>Teléfono</th><th>Acceso</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay personas que coincidan con los filtros.')}
     <div id="editor-host"></div>
   </section>`;
 }
 
 function renderRolesSection() {
   const roles = structureData?.roles || [];
-  const labels = { COACH:'Entrenador', MANAGER:'Manager', REFEREE:'Árbitro', COORDINATOR:'Coordinador', COLLABORATOR:'Colaborador', ADMINISTRATIVE:'Administrativo', PLAYER:'Jugador', OTHER:'Otro' };
+  const labels = { ADMIN:'Administrador', COACH:'Entrenador', MANAGER:'Manager', REFEREE:'Árbitro', COORDINATOR:'Coordinador', COLLABORATOR:'Colaborador', ADMINISTRATIVE:'Administrativo', PLAYER:'Jugador', OTHER:'Otro' };
   const rows = roles.map(role => `<tr><td><strong>${escapeHtml(role.name)}</strong><small>${escapeHtml(role.description || '')}</small></td><td>${escapeHtml(labels[role.category] || role.category)}</td><td>${escapeHtml(role.scopeType)}</td><td>${statusBadge(role.status)}</td><td><button class="button mini secondary" data-edit-role="${escapeHtml(role.roleId)}">Editar</button></td></tr>`).join('');
   return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Cargos</h2><p>Los cargos son configurables y no equivalen automáticamente a permisos de seguridad.</p></div><button class="button primary" id="new-role">Nuevo cargo</button></div>${roles.length ? `<div class="table-wrap"><table><thead><tr><th>Cargo</th><th>Categoría</th><th>Alcance</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay cargos configurados.')}<div id="editor-host"></div></section>`;
 }
 
 function renderDivisionsSection() {
-  const divisions = structureData?.divisions || [];
-  const rows = divisions.map(item => `<tr><td><strong><span class="division-color-dot" style="--division-color:${escapeHtml(item.color||'#2563EB')}"></span>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.code || '')}</small></td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-division="${escapeHtml(item.divisionId)}">Editar</button></td></tr>`).join('');
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones</h2><p>Se vinculan a la temporada activa para conservar histórico.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones para la temporada activa.')}<div id="editor-host"></div></section>`;
+  const divisions = structureData?.divisions || [], teams=structureData?.teams||[];
+  const rows = divisions.map(item => {
+    const own=teams.filter(t=>t.divisionId===item.divisionId);
+    const teamHtml=own.length?own.map(t=>`<span class="badge active">${escapeHtml(t.name)}</span> <button class="button mini secondary" data-edit-team="${escapeHtml(t.teamId)}">Editar</button>`).join('<br>'):'<span class="muted">Sin equipos creados</span>';
+    return `<tr><td><strong><span class="division-color-dot" style="--division-color:${escapeHtml(item.color||'#2563EB')}"></span>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.code || '')}</small></td><td>${teamHtml}<div style="margin-top:.45rem"><button class="button mini primary" data-new-team-division="${escapeHtml(item.divisionId)}">+ Equipo</button></div></td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-division="${escapeHtml(item.divisionId)}">Editar división</button></td></tr>`;
+  }).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones y equipos</h2><p>Los equipos A/B pertenecen a la división y se crean desde aquí. Las personas nunca se asignan permanentemente a A/B.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipos</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones para la temporada activa.')}<div id="editor-host"></div></section>`;
 }
 
 function renderTeamsSection() {
@@ -635,13 +633,8 @@ function renderAssignmentsSection() {
   const people = Object.fromEntries((data.persons || []).map(x => [x.personId, x]));
   const roles = Object.fromEntries((data.roles || []).map(x => [x.roleId, x]));
   const divisions = Object.fromEntries((data.divisions || []).map(x => [x.divisionId, x]));
-  const teams = Object.fromEntries((data.teams || []).map(x => [x.teamId, x]));
-  const rows = (data.assignments || []).map(item => `<tr>
-    <td><strong>${escapeHtml(people[item.personId]?.displayName || '—')}</strong><small>${escapeHtml(roles[item.roleId]?.name || '—')}</small></td>
-    <td>${escapeHtml(divisions[item.divisionId]?.name || 'Transversal')}</td><td>${escapeHtml(teams[item.teamId]?.name || '—')}</td>
-    <td>${escapeHtml(item.startDate || '—')}${item.endDate ? ' → ' + escapeHtml(item.endDate) : ''}</td><td>${statusBadge(item.status)}</td>
-    <td><button class="button mini secondary" data-edit-assignment="${escapeHtml(item.assignmentId)}">Editar</button></td></tr>`).join('');
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Relacioná personas con cargos, divisiones y equipos. División y equipo pueden quedar vacíos para funciones transversales.</p></div><button class="button primary" id="new-assignment">Nueva asignación</button></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Equipo</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay asignaciones.')}<div id="editor-host"></div></section>`;
+  const rows = (data.assignments || []).map(item => `<tr><td><strong>${escapeHtml(people[item.personId]?.displayName || '—')}</strong><small>${escapeHtml(roles[item.roleId]?.name || '—')}</small></td><td>${escapeHtml(divisions[item.divisionId]?.name || 'Transversal')}</td><td>${escapeHtml(item.startDate || '—')}${item.endDate ? ' → ' + escapeHtml(item.endDate) : ''}</td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-assignment="${escapeHtml(item.assignmentId)}">Editar</button></td></tr>`).join('');
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Asignaciones</h2><p>Relacioná personas con uno o varios cargos y divisiones. Dejá División vacía para cargos transversales. Los equipos A/B no forman parte de la asignación.</p></div><button class="button primary" id="new-assignment">Nueva asignación</button></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Persona / cargo</th><th>División</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay asignaciones.')}<div id="editor-host"></div></section>`;
 }
 
 function renderGuardiansSection() {
@@ -657,12 +650,13 @@ function wireStructureSection() {
   document.getElementById('new-person')?.addEventListener('click', () => showPersonEditor());
   document.getElementById('new-role')?.addEventListener('click', () => showRoleEditor());
   document.getElementById('new-division')?.addEventListener('click', () => showDivisionEditor());
-  document.getElementById('new-team')?.addEventListener('click', () => showTeamEditor());
   document.getElementById('new-assignment')?.addEventListener('click', () => showAssignmentEditor());
+  bind('[data-create-access]', data => renderUsers(data.createAccess));
   bind('[data-edit-person]', data => showPersonEditor((structureData.persons || []).find(x => x.personId === data.editPerson)));
   bind('[data-edit-role]', data => showRoleEditor((structureData.roles || []).find(x => x.roleId === data.editRole)));
   bind('[data-edit-division]', data => showDivisionEditor((structureData.divisions || []).find(x => x.divisionId === data.editDivision)));
   bind('[data-edit-team]', data => showTeamEditor((structureData.teams || []).find(x => x.teamId === data.editTeam)));
+  bind('[data-new-team-division]', data => showTeamEditor({divisionId:data.newTeamDivision,status:'ACTIVE'}));
   bind('[data-edit-assignment]', data => showAssignmentEditor((structureData.assignments || []).find(x => x.assignmentId === data.editAssignment)));
   if(structureSection==='people'){
     const apply=()=>{saveUiStatePatch_({peopleFilters:{q:val('people-filter-q'),divisionId:val('people-filter-division'),status:val('people-filter-status')}});renderStructure('people');};
@@ -698,7 +692,7 @@ function showPersonEditor(person = {}) {
 function showRoleEditor(role = {}) {
   editorShell(role.roleId ? 'Editar cargo' : 'Nuevo cargo', 'El alcance orienta dónde puede aplicarse, pero una asignación puede seguir siendo transversal.', `
     <label>Nombre del cargo<input id="role-name" maxlength="100" required value="${escapeHtml(role.name || '')}"></label>
-    <div class="form-grid two"><label>Categoría<select id="role-category">${[['COACH','Entrenador'],['MANAGER','Manager'],['REFEREE','Árbitro'],['COORDINATOR','Coordinador'],['COLLABORATOR','Colaborador'],['ADMINISTRATIVE','Administrativo'],['PLAYER','Jugador'],['OTHER','Otro']].map(([v,l]) => `<option value="${v}" ${role.category===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Alcance<select id="role-scope">${[['FLEXIBLE','Flexible'],['TRANSVERSAL','Transversal'],['DIVISION','División'],['TEAM','Equipo']].map(([v,l]) => `<option value="${v}" ${role.scopeType===v?'selected':''}>${l}</option>`).join('')}</select></label></div>
+    <div class="form-grid two"><label>Categoría<select id="role-category">${[['ADMIN','Administrador'],['COACH','Entrenador'],['MANAGER','Manager'],['REFEREE','Árbitro'],['COORDINATOR','Coordinador'],['COLLABORATOR','Colaborador'],['ADMINISTRATIVE','Administrativo'],['PLAYER','Jugador'],['OTHER','Otro']].map(([v,l]) => `<option value="${v}" ${role.category===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Alcance<select id="role-scope">${[['FLEXIBLE','Flexible'],['TRANSVERSAL','Transversal'],['DIVISION','División']].map(([v,l]) => `<option value="${v}" ${role.scopeType===v?'selected':''}>${l}</option>`).join('')}</select></label></div>
     <label>Descripción<textarea id="role-description" maxlength="300" rows="3">${escapeHtml(role.description || '')}</textarea></label>
     <label>Estado<select id="role-status"><option value="ACTIVE" ${role.status !== 'INACTIVE' ? 'selected' : ''}>Activo</option><option value="INACTIVE" ${role.status === 'INACTIVE' ? 'selected' : ''}>Inactivo</option></select></label>`);
   document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveRole', { roleId: role.roleId || '', name: val('role-name'), category: val('role-category'), scopeType: val('role-scope'), description: val('role-description'), status: val('role-status') });
@@ -721,23 +715,8 @@ function showAssignmentEditor(item = {}) {
   const activePeople = (structureData.persons || []).filter(x => x.status === 'ACTIVE' || x.personId === item.personId);
   const activeRoles = (structureData.roles || []).filter(x => x.status === 'ACTIVE' || x.roleId === item.roleId);
   const activeDivisions = (structureData.divisions || []).filter(x => x.status === 'ACTIVE' || x.divisionId === item.divisionId);
-  const teams = structureData.teams || [];
-  editorShell(item.assignmentId ? 'Editar asignación' : 'Nueva asignación', 'Dejá división y equipo vacíos para cargos transversales.', `
-    <div class="form-grid two"><label>Persona<select id="assignment-person" required>${optionList(activePeople,'personId',x=>x.displayName,item.personId||'',false)}</select></label><label>Cargo<select id="assignment-role" required>${optionList(activeRoles,'roleId',x=>x.name,item.roleId||'',false)}</select></label></div>
-    <div class="form-grid two"><label>División<select id="assignment-division">${optionList(activeDivisions,'divisionId',x=>x.name,item.divisionId||'')}</select></label><label>Equipo<select id="assignment-team">${optionList(teams,'teamId',x=>x.name,item.teamId||'')}</select></label></div>
-    <div class="form-grid two"><label>Desde<input id="assignment-start" type="date" value="${escapeHtml(item.startDate || '')}"></label><label>Hasta<input id="assignment-end" type="date" value="${escapeHtml(item.endDate || '')}"></label></div>
-    <label>Estado<select id="assignment-status"><option value="ACTIVE" ${item.status !== 'ENDED' ? 'selected' : ''}>Activa</option><option value="ENDED" ${item.status === 'ENDED' ? 'selected' : ''}>Finalizada</option></select></label>
-    <label>Notas<textarea id="assignment-notes" maxlength="500" rows="3">${escapeHtml(item.notes || '')}</textarea></label>`);
-  const divSelect = document.getElementById('assignment-division');
-  const teamSelect = document.getElementById('assignment-team');
-  const refreshTeams = () => {
-    const divId = divSelect.value;
-    const allowed = teams.filter(x => (!divId || x.divisionId === divId) && (x.status === 'ACTIVE' || x.teamId === item.teamId));
-    teamSelect.innerHTML = optionList(allowed, 'teamId', x => x.name, allowed.some(x => x.teamId === item.teamId) ? item.teamId : '');
-  };
-  divSelect.onchange = refreshTeams;
-  refreshTeams();
-  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: val('assignment-division'), teamId: val('assignment-team'), seasonId: item.seasonId || structureData.activeSeasonId || '', startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
+  editorShell(item.assignmentId ? 'Editar asignación' : 'Nueva asignación', 'Una persona puede tener varios cargos y varias divisiones. A/B se decide en cada partido, no aquí.', `<div class="form-grid two"><label>Persona<select id="assignment-person" required>${optionList(activePeople,'personId',x=>x.displayName,item.personId||'',false)}</select></label><label>Cargo<select id="assignment-role" required>${optionList(activeRoles,'roleId',x=>x.name,item.roleId||'',false)}</select></label></div><label>División<select id="assignment-division">${optionList(activeDivisions,'divisionId',x=>x.name,item.divisionId||'')}</select><small>Vacía = función transversal.</small></label><div class="form-grid two"><label>Desde<input id="assignment-start" type="date" value="${escapeHtml(item.startDate || '')}"></label><label>Hasta<input id="assignment-end" type="date" value="${escapeHtml(item.endDate || '')}"></label></div><label>Estado<select id="assignment-status"><option value="ACTIVE" ${item.status !== 'ENDED' ? 'selected' : ''}>Activa</option><option value="ENDED" ${item.status === 'ENDED' ? 'selected' : ''}>Finalizada</option></select></label><label>Notas<textarea id="assignment-notes" maxlength="500" rows="3">${escapeHtml(item.notes || '')}</textarea></label>`);
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: val('assignment-division'), seasonId: item.seasonId || structureData.activeSeasonId || '', startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
 }
 
 function val(id) { return document.getElementById(id)?.value?.trim?.() ?? document.getElementById(id)?.value ?? ''; }
@@ -989,26 +968,24 @@ async function renderDocuments(){
 }
 async function reviewDocUi(id,status){try{const notes=status==='REJECTED'?(prompt('Motivo del rechazo:')||''):'';await call('reviewDocument',{documentId:id,status,reviewNotes:notes});await renderDocuments();}catch(err){showMessage(err.message,'error');}}
 
-async function renderUsers(){
+async function renderUsers(preselectedPersonId=''){
   if(!['ADMIN','MANAGER'].includes(currentUser?.role)) return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>No tienes permisos para administrar usuarios.</p></section>','users');
   try{
-    const {data}=await call('getUsersData'); const people=data.persons||[], users=data.users||[], roles=data.securityRoles||[];
+    const {data}=await call('getUsersData'); const people=data.persons||[], users=data.users||[], roles=data.securityRoles||[], personAccessRoles=data.personAccessRoles||{};
     const st=loadUiState_().userFilters||{}, q=textNorm_(st.q||''), status=st.status||'', role=st.role||'';
     const filtered=users.filter(u=>(!q||textNorm_([u.email,personNameById(people,u.personId)].join(' ')).includes(q))&&(!status||u.status===status)&&(!role||u.securityRole===role));
-    const rows=filtered.map(u=>`<tr><td><strong>${escapeHtml(u.email)}</strong><small>${escapeHtml(personNameById(people,u.personId))}</small></td><td>${escapeHtml(u.securityRole)}</td><td>${statusBadge(u.status)}</td><td>${escapeHtml(u.lastLoginAt||'Nunca')}</td><td><button class="button mini secondary" data-reset-user="${u.userId}">Reset</button><button class="button mini secondary" data-toggle-user="${u.userId}" data-status="${u.status}" data-role="${u.securityRole}">${u.status==='ACTIVE'?'Desactivar':'Activar'}</button></td></tr>`).join('');
-    shell(`<section class="hero compact"><span class="eyebrow">Accesos</span><h1>Usuarios y permisos</h1><p>La cuenta de acceso se mantiene separada de la ficha de persona.</p></section>
+    const rows=filtered.map(u=>`<tr><td><strong>${escapeHtml(u.email)}</strong><small>${escapeHtml(personNameById(people,u.personId))}</small></td><td><strong>${escapeHtml(u.securityRole)}</strong><small>${escapeHtml((u.accessRoles||[]).join(' · ')||'—')}</small></td><td>${statusBadge(u.status)}</td><td>${escapeHtml(u.lastLoginAt||'Nunca')}</td><td><button class="button mini secondary" data-reset-user="${u.userId}">Reset</button><button class="button mini secondary" data-toggle-user="${u.userId}" data-status="${u.status}" data-role="${u.securityRole}">${u.status==='ACTIVE'?'Desactivar':'Activar'}</button></td></tr>`).join('');
+    shell(`<section class="hero compact"><span class="eyebrow">Accesos</span><h1>Usuarios y permisos</h1><p>La cuenta se vincula a una Persona. El rol de acceso efectivo se deriva de sus cargos activos; una persona puede tener varios cargos.</p></section>
     <section class="panel"><div class="panel-heading"><div><h2>Cuentas</h2></div></div><div class="filter-bar"><label class="filter-grow">Buscar<input id="user-filter-q" placeholder="Nombre o correo" value="${escapeHtml(st.q||'')}"></label><label>Rol<select id="user-filter-role"><option value="">Todos</option>${roles.map(r=>`<option value="${r}" ${role===r?'selected':''}>${r}</option>`).join('')}</select></label><label>Estado<select id="user-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="DISABLED" ${status==='DISABLED'?'selected':''}>Desactivados</option><option value="LOCKED" ${status==='LOCKED'?'selected':''}>Bloqueados</option></select></label><button class="button secondary filter-clear" id="user-filter-clear">Limpiar</button></div><p class="filter-count">${filtered.length} de ${users.length} usuarios</p>${filtered.length?`<div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay usuarios que coincidan con los filtros.')}
     <form id="user-form" class="form-grid two" style="margin-top:1rem">
-      <label>Persona<select id="user-person" required>${optionList(people,'personId',p=>p.displayName,'',false)}</select></label>
-      <label>Correo<input id="user-email" type="email" required></label>
-      <label>Rol<select id="user-role">${roles.map(r=>`<option value="${r}">${r}</option>`).join('')}</select></label>
+      <label>Persona<select id="user-person" required>${optionList(people,'personId',p=>p.displayName,preselectedPersonId||'',false)}</select></label><label>Correo<input id="user-email" type="email" required></label><label>Cargos / acceso<input id="user-derived-roles" readonly placeholder="Se deriva de los cargos activos"></label>
       <label>Contraseña temporal<input id="user-password" type="password" minlength="10" required></label>
       <div><button class="button primary" type="submit">Crear usuario</button></div>
     </form><div id="message" class="message"></div></section>`,'users');
     const applyFilters=()=>{saveUiStatePatch_({userFilters:{q:val('user-filter-q'),role:val('user-filter-role'),status:val('user-filter-status')}});renderUsers();};
     document.getElementById('user-filter-q').onchange=applyFilters;document.getElementById('user-filter-q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();applyFilters();}};document.getElementById('user-filter-role').onchange=applyFilters;document.getElementById('user-filter-status').onchange=applyFilters;document.getElementById('user-filter-clear').onclick=()=>{saveUiStatePatch_({userFilters:{}});renderUsers();};
-    document.getElementById('user-person').onchange=()=>{const p=people.find(x=>x.personId===val('user-person'));if(p&&p.email)document.getElementById('user-email').value=p.email;};
-    document.getElementById('user-form').onsubmit=async e=>{e.preventDefault();try{await call('createUser',{personId:val('user-person'),email:val('user-email'),securityRole:val('user-role'),temporaryPassword:val('user-password')});await renderUsers();}catch(err){showMessage(err.message,'error');}};
+    const syncUserPerson=()=>{const pid=val('user-person'),p=people.find(x=>x.personId===pid);if(p&&p.email)document.getElementById('user-email').value=p.email;const rs=personAccessRoles[pid]||[];const el=document.getElementById('user-derived-roles');if(el)el.value=rs.length?rs.join(' · '):'Sin cargo con acceso';};document.getElementById('user-person').onchange=syncUserPerson;syncUserPerson();
+    document.getElementById('user-form').onsubmit=async e=>{e.preventDefault();try{await call('createUser',{personId:val('user-person'),email:val('user-email'),temporaryPassword:val('user-password')});await renderUsers();}catch(err){showMessage(err.message,'error');}};
     document.querySelectorAll('[data-reset-user]').forEach(b=>b.onclick=async()=>{const pwd=prompt('Nueva contraseña temporal (mínimo 10 caracteres):');if(!pwd)return;try{await call('resetUserPassword',{userId:b.dataset.resetUser,temporaryPassword:pwd});showMessage('Contraseña restablecida.','success');}catch(err){showMessage(err.message,'error');}});
     document.querySelectorAll('[data-toggle-user]').forEach(b=>b.onclick=async()=>{try{await call('updateUserAccess',{userId:b.dataset.toggleUser,status:b.dataset.status==='ACTIVE'?'DISABLED':'ACTIVE',securityRole:b.dataset.role});await renderUsers();}catch(err){showMessage(err.message,'error');}});
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar usuarios</h1><p>${escapeHtml(err.message)}</p></section>`,'users');}

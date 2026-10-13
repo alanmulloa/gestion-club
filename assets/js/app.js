@@ -6,6 +6,7 @@ let currentUser = null;
 let clubConfig = null;
 let structureData = null;
 let statisticsData = null;
+let seasonContext = null;
 let familyData = null;
 let structureSection = 'people';
 const UI_STATE_KEY = 'gestionClub.uiState.v1';
@@ -137,7 +138,7 @@ function serverApi(request) {
       if (finished) return;
       finished = true;
       reject(new Error('El backend está tardando demasiado en responder.'));
-    }, request?.action === 'importLeagueCalendar' ? 150000 : request?.action === 'previewLeagueCalendarImport' ? 60000 : ['uploadMatchReport','reprocessMatchReport'].includes(request?.action) ? 120000 : 30000);
+    }, request?.action === 'importLeagueCalendar' ? 150000 : request?.action === 'previewLeagueCalendarImport' ? 60000 : ['uploadMatchReport','reprocessMatchReport'].includes(request?.action) ? 120000 : request?.action === 'getStatisticsData' ? 60000 : 30000);
     google.script.run
       .withSuccessHandler(response => {
         if (finished) return;
@@ -196,6 +197,7 @@ function clearSession() {
   sessionToken = '';
   currentUser = null;
   clubConfig = null;
+  seasonContext = null;
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
@@ -221,9 +223,42 @@ function roleDisplayName(role) {
   return ({ADMIN:'Administrador',MANAGER:'Manager',COACH:'Entrenador',REFEREE:'Árbitro',PLAYER:'Jugador',TUTOR:'Tutor',COLLABORATOR:'Colaborador'})[role] || role || '';
 }
 
+function seasonList_(){return seasonContext?.seasons||[];}
+function selectedSeasonId_(){
+  const seasons=seasonList_(),saved=String(loadUiState_().selectedSeasonId||''),active=String(seasonContext?.activeSeasonId||clubConfig?.activeSeason?.seasonId||'');
+  if(saved&&seasons.some(x=>x.seasonId===saved))return saved;
+  if(active&&seasons.some(x=>x.seasonId===active))return active;
+  return seasons[0]?.seasonId||active||'';
+}
+function selectedSeason_(){const id=selectedSeasonId_();return seasonList_().find(x=>x.seasonId===id)||clubConfig?.activeSeason||null;}
+async function loadSeasonContext_(force=false){
+  if(seasonContext&&!force)return seasonContext;
+  const {data}=await call('getSeasonContext');seasonContext=data||{activeSeasonId:'',seasons:[]};
+  const selected=selectedSeasonId_();if(selected!==String(loadUiState_().selectedSeasonId||''))saveUiStatePatch_({selectedSeasonId:selected});
+  return seasonContext;
+}
+function seasonSwitcherMarkup_(){
+  if(!currentUser)return '';
+  const seasons=seasonList_(),selectedId=selectedSeasonId_(),activeId=seasonContext?.activeSeasonId||'';
+  if(!seasons.length)return `<div class="season-switcher empty"><span>Temporada</span><strong>Sin configurar</strong></div>`;
+  return `<label class="season-switcher"><span>Temporada</span><select id="global-season-select" aria-label="Temporada de trabajo">${seasons.map(x=>`<option value="${escapeHtml(x.seasonId)}" ${x.seasonId===selectedId?'selected':''}>${escapeHtml(x.name)}${x.seasonId===activeId?' · activa':''}</option>`).join('')}</select></label>`;
+}
+function resetSeasonScopedUi_(seasonId){
+  const ui=loadUiState_(),calendar=Object.assign({},ui.calendarFilters||{},{divisionId:'',teamId:''}),statistics=Object.assign({},ui.statisticsFilters||{},{seasonId:seasonId||'',divisionId:'',teamId:''}),people=Object.assign({},ui.peopleFilters||{},{divisionId:''});
+  saveUiStatePatch_({selectedSeasonId:seasonId||'',calendarFilters:calendar,statisticsFilters:statistics,peopleFilters:people});
+  structureData=null;calendarData=null;statisticsData=null;
+}
+function rerenderForSeason_(active){
+  if(active==='home')return renderDashboard();
+  if(active==='structure')return renderStructure();
+  if(active==='calendar')return renderCalendar();
+  if(active==='statistics')return renderStatistics();
+  if(active==='seasons')return renderSeasons();
+}
+
 function navigationForRole(role) {
   const all = [
-    ['home','Inicio'],['structure','Estructura'],['documents','Documentos'],['calendar','Calendario'],['statistics','Estadísticas'],['users','Usuarios'],['settings','Configuración']
+    ['home','Inicio'],['structure','Estructura'],['documents','Documentos'],['calendar','Calendario'],['statistics','Estadísticas'],['users','Usuarios'],['seasons','Temporadas'],['settings','Configuración']
   ];
   if (role === 'MANAGER') return all.filter(x => ['home','structure','documents','calendar','statistics','users'].includes(x[0]));
   if (role === 'COACH') return all.filter(x => ['home','structure','documents','calendar','statistics'].includes(x[0]));
@@ -237,7 +272,7 @@ function navigationForRole(role) {
 function navMarkup(active) {
   if (!currentUser) return '';
   return navigationForRole(currentUser.role).map(([key,label]) =>
-    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',statistics:'▥',users:'◎',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
+    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',statistics:'▥',users:'◎',seasons:'◫',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
   ).join('');
 }
 
@@ -250,7 +285,8 @@ function dashboardCardsForRole() {
   if (['ADMIN','MANAGER','COACH','REFEREE','PLAYER','TUTOR','COLLABORATOR'].includes(role)) cards.push(['Archivos','Documentación','Consultá y gestioná la documentación a la que tenés acceso.','go-documents','secondary']);
   if (['ADMIN','MANAGER'].includes(role)) cards.push(['Acceso','Usuarios','Creación de cuentas, roles y accesos.','go-users','secondary']);
   if (['ADMIN','MANAGER','TUTOR'].includes(role)) cards.push(['Familias','Tutores y menores','Relaciones entre menores y tutores autorizados.','go-families','secondary']);
-  if (role==='ADMIN') cards.push(['Club','Configuración','Nombre, logo, colores y temporada activa.','go-settings','secondary']);
+  if (role==='ADMIN') cards.push(['Temporadas','Gestión de temporadas','Alta, activación y reglas deportivas por temporada.','go-seasons','secondary']);
+  if (role==='ADMIN') cards.push(['Club','Configuración','Identidad, contacto, logo y colores del club.','go-settings','secondary']);
   return cards.map(c=>`<article class="quick-card role-card"><span class="eyebrow">${c[0]}</span><h2>${c[1]}</h2><p>${c[2]}</p><button class="button ${c[4]}" id="${c[3]}">${c[1]}</button></article>`).join('');
 }
 
@@ -261,6 +297,7 @@ function shell(content, active = 'home') {
   root.innerHTML = `
     <header class="topbar">
       <div class="brand">${brandMarkup()}</div>
+      ${currentUser ? seasonSwitcherMarkup_() : ''}
       ${currentUser ? `<div class="session"><div class="session-copy"><span>${escapeHtml(currentUser.displayName||currentUser.email)}</span><small>${escapeHtml(roleDisplayName(currentUser.role))}</small></div><button class="button ghost logout-button" id="logout">Salir</button></div>` : ''}
     </header>
     ${currentUser ? `<nav class="nav">${navMarkup(active)}</nav>` : ''}
@@ -268,6 +305,7 @@ function shell(content, active = 'home') {
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
   if (logoutButton) logoutButton.onclick = logout;
+  const seasonSelect=document.getElementById('global-season-select');if(seasonSelect)seasonSelect.onchange=()=>{resetSeasonScopedUi_(seasonSelect.value);rerenderForSeason_(active);};
   document.querySelectorAll('[data-nav]').forEach(button => {
     button.onclick = () => {
       const nav=button.dataset.nav;
@@ -278,6 +316,7 @@ function shell(content, active = 'home') {
       if(nav==='users') return renderUsers();
       if(nav==='calendar') return renderCalendar();
       if(nav==='statistics') return renderStatistics();
+      if(nav==='seasons') return renderSeasons();
       return renderDashboard();
     };
   });
@@ -319,6 +358,7 @@ function renderLogin() {
       });
       saveSession(response.data);
       await loadClubConfig();
+      await loadSeasonContext_(true);
       await renderDashboard();
     } catch (error) {
       showMessage(error.message, 'error');
@@ -351,13 +391,14 @@ function statusCard(title, state, detail) {
 
 async function renderDashboard() {
   if (!clubConfig) await loadClubConfig();
+  if (!seasonContext) await loadSeasonContext_();
   const clubName = clubConfig?.officialName || 'Tu club todavía no está configurado';
-  const season = clubConfig?.activeSeason?.name || 'Sin temporada activa';
+  const season = selectedSeason_()?.name || 'Sin temporada configurada';
   shell(`
     <section class="hero role-hero">
       <span class="eyebrow">${escapeHtml(roleDisplayName(currentUser?.role))}</span>
       <h1>${escapeHtml(clubName)}</h1>
-      <p>${escapeHtml(season)}. Accesos rápidos adaptados a tu función.</p>
+      <p>Temporada de trabajo: ${escapeHtml(season)}. Accesos rápidos adaptados a tu función.</p>
     </section>
     <section class="quick-grid role-quick-grid">${dashboardCardsForRole()}</section>
     <section class="panel">
@@ -371,6 +412,7 @@ async function renderDashboard() {
   wire('go-users',renderUsers);
   wire('go-calendar',renderCalendar);
   wire('go-statistics',renderStatistics);
+  wire('go-seasons',renderSeasons);
   wire('go-settings',renderClubSettings);
   document.getElementById('refresh-status').onclick = loadStatus;
   await loadStatus();
@@ -400,6 +442,29 @@ async function loadStatus() {
   }
 }
 
+async function renderSeasons(){
+  if(currentUser?.role!=='ADMIN')return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>Solo un administrador puede gestionar las temporadas.</p></section>','seasons');
+  if(!seasonContext)await loadSeasonContext_();
+  shell(`<section class="hero compact"><span class="eyebrow">Temporadas</span><h1>Gestión deportiva por temporada</h1><p>Creá, editá y activá temporadas. El selector de la cabecera cambia la temporada de trabajo; “Activar” define cuál se usará por defecto al entrar.</p></section><section class="panel"><div class="section-heading"><h2>Temporadas</h2><p>Equipos, asignaciones, calendario y estadísticas se separan por temporada. Personas, cargos y divisiones siguen siendo registros maestros.</p></div><div id="season-manager-content"><p>Cargando temporadas…</p></div></section>`,'seasons');
+  await hydrateSeasonManager_();
+}
+
+async function hydrateSeasonManager_(){
+  try{
+    const seasonResp=await call('getSeasonsData'),sd=seasonResp.data||{},list=sd.seasons||[];
+    const rows=list.map(x=>`<tr><td><strong>${escapeHtml(x.name)}</strong><small>${escapeHtml(x.startDate||'')} → ${escapeHtml(x.endDate||'')}</small></td><td>${x.seasonId===sd.activeSeasonId?'<span class="badge active">Activa</span>':statusBadge(x.status)}</td><td>${x.divisionCount||0} div · ${x.teamCount||0} equipos · ${x.assignmentCount||0} asignaciones · ${x.eventCount||0} eventos</td><td><button type="button" class="button mini secondary" data-edit-season="${escapeHtml(x.seasonId)}">Editar</button> <button type="button" class="button mini secondary" data-config-season="${escapeHtml(x.seasonId)}">Reglas</button> ${x.seasonId===sd.activeSeasonId?'':`<button type="button" class="button mini primary" data-activate-season="${escapeHtml(x.seasonId)}">Activar</button>`}</td></tr>`).join('');
+    const host=document.getElementById('season-manager-content');if(!host)return;
+    host.innerHTML=`${rows?`<div class="table-wrap"><table><thead><tr><th>Temporada</th><th>Estado</th><th>Datos deportivos</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty-state">No hay temporadas todavía.</div>'}<div class="section-divider"></div><div class="section-heading"><h3>Nueva temporada / edición</h3><p>Al crear una temporada se preparan las reglas de división tomando como base la temporada activa.</p></div><form id="new-season-form" class="form-grid three"><input id="new-season-id" type="hidden"><label>Nombre<input id="new-season-name" placeholder="2027/2028" required></label><label>Inicio<input id="new-season-start" type="date"></label><label>Fin<input id="new-season-end" type="date"></label><label>Estado<select id="new-season-status"><option value="PLANNED">Planificada</option><option value="INACTIVE">Inactiva</option><option value="CLOSED">Cerrada</option></select></label><label class="check-row"><input id="new-season-activate" type="checkbox"> Activar al guardar</label><div><button class="button secondary" type="button" id="cancel-season-edit" hidden>Cancelar</button> <button class="button primary" type="submit" id="save-season-button">Crear temporada</button></div></form><div id="season-message" class="message"></div><div id="season-division-config"></div>`;
+    document.querySelectorAll('[data-activate-season]').forEach(b=>b.onclick=async()=>{try{const seasonId=b.dataset.activateSeason;await call('setActiveSeason',{seasonId});clubConfig=null;await loadClubConfig();await loadSeasonContext_(true);resetSeasonScopedUi_(seasonId);showToast_('Temporada activa actualizada.');await renderSeasons();}catch(err){showMessage(err.message,'error','season-message');}});
+    document.querySelectorAll('[data-config-season]').forEach(b=>b.onclick=()=>renderSeasonDivisionConfig_(sd,b.dataset.configSeason));
+    const seasonForm=document.getElementById('new-season-form');
+    const resetSeasonForm=()=>{seasonForm.reset();document.getElementById('new-season-id').value='';document.getElementById('save-season-button').textContent='Crear temporada';document.getElementById('cancel-season-edit').hidden=true;};
+    document.querySelectorAll('[data-edit-season]').forEach(b=>b.onclick=()=>{const x=list.find(s0=>s0.seasonId===b.dataset.editSeason);if(!x)return;document.getElementById('new-season-id').value=x.seasonId;document.getElementById('new-season-name').value=x.name||'';document.getElementById('new-season-start').value=x.startDate||'';document.getElementById('new-season-end').value=x.endDate||'';document.getElementById('new-season-status').value=x.status==='ACTIVE'?'INACTIVE':(x.status||'PLANNED');document.getElementById('new-season-activate').checked=x.seasonId===sd.activeSeasonId;document.getElementById('save-season-button').textContent='Guardar temporada';document.getElementById('cancel-season-edit').hidden=false;seasonForm.scrollIntoView({behavior:'smooth',block:'center'});});
+    document.getElementById('cancel-season-edit').onclick=resetSeasonForm;
+    seasonForm.onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;try{const seasonId=val('new-season-id'),activate=document.getElementById('new-season-activate').checked;const saved=(await call('saveSeason',{seasonId,name:val('new-season-name'),startDate:val('new-season-start'),endDate:val('new-season-end'),status:val('new-season-status'),activate})).data;await loadSeasonContext_(true);if(activate&&saved?.seasonId){clubConfig=null;await loadClubConfig();resetSeasonScopedUi_(saved.seasonId);}showToast_(seasonId?'Temporada actualizada.':'Temporada creada.');await renderSeasons();}catch(err){showMessage(err.message,'error','season-message');if(button)button.disabled=false;}};
+  }catch(err){const host=document.getElementById('season-manager-content');if(host)host.innerHTML=`<div class="message error">${escapeHtml(err.message)}</div>`;}
+}
+
 async function renderClubSettings() {
   try {
     if (!clubConfig) await loadClubConfig();
@@ -408,13 +473,12 @@ async function renderClubSettings() {
   }
   if (currentUser?.role !== 'ADMIN') return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>Solo un administrador puede modificar la configuración del club.</p></section>', 'settings');
   const s = clubConfig || {};
-  const season = s.activeSeason || {};
   const logoPreview = s.logoDataUrl ? `<img id="logo-preview" class="logo-preview" src="${escapeHtml(s.logoDataUrl)}" alt="Logo actual">` : `<div id="logo-preview" class="logo-placeholder">Sin logo</div>`;
   shell(`
     <section class="hero compact">
       <span class="eyebrow">Configuración</span>
       <h1>Identidad del club</h1>
-      <p>Estos datos personalizan la aplicación y preparan la estructura para los siguientes módulos.</p>
+      <p>Datos generales, identidad visual y contacto del club. La gestión de temporadas tiene ahora su propia sección.</p>
     </section>
     <div class="settings-layout">
       <form id="club-form" class="panel settings-main">
@@ -425,18 +489,7 @@ async function renderClubSettings() {
           <label>Correo de contacto<input id="contact-email" type="email" maxlength="254" value="${escapeHtml(s.contactEmail || '')}"></label>
           <label>Teléfono de contacto<input id="contact-phone" maxlength="40" value="${escapeHtml(s.contactPhone || '')}"></label>
         </div>
-        <div class="section-divider"></div>
-        <div class="section-heading"><h2>Temporada activa</h2><p>La temporada quedará registrada como entidad independiente para conservar histórico.</p></div>
-        <div class="form-grid three">
-          <label>Nombre<input id="season-name" maxlength="80" placeholder="2026/2027" value="${escapeHtml(season.name || '')}"></label>
-          <label>Inicio<input id="season-start" type="date" value="${escapeHtml(season.startDate || '')}"></label>
-          <label>Fin<input id="season-end" type="date" value="${escapeHtml(season.endDate || '')}"></label>
-        </div>
       </form>
-      <section class="panel settings-main" id="season-manager-panel">
-        <div class="section-heading"><h2>Temporadas</h2><p>La estructura deportiva, equipos, asignaciones, calendario y estadísticas se separan por temporada. Personas, cargos y usuarios siguen siendo registros únicos.</p></div>
-        <div id="season-manager-content"><p>Cargando temporadas…</p></div>
-      </section>
       <aside class="settings-side">
         <section class="panel">
           <div class="section-heading"><h2>Logo</h2><p>PNG, JPG o WebP. Máximo 1,5 MB.</p></div>
@@ -457,21 +510,6 @@ async function renderClubSettings() {
       </aside>
       <div class="settings-actions"><div id="message" class="message" aria-live="polite"></div><button class="button primary" type="submit" form="club-form">Guardar configuración</button></div>
     </div>`, 'settings');
-
-  try {
-    const seasonResp=await call('getSeasonsData');
-    const sd=seasonResp.data||{}, list=sd.seasons||[];
-    const rows=list.map(x=>`<tr><td><strong>${escapeHtml(x.name)}</strong><small>${escapeHtml(x.startDate||'')} → ${escapeHtml(x.endDate||'')}</small></td><td>${x.seasonId===sd.activeSeasonId?'<span class="badge active">Activa</span>':statusBadge(x.status)}</td><td>${x.divisionCount||0} div · ${x.teamCount||0} equipos · ${x.assignmentCount||0} asignaciones · ${x.eventCount||0} eventos</td><td><button type="button" class="button mini secondary" data-edit-season="${escapeHtml(x.seasonId)}">Editar</button> <button type="button" class="button mini secondary" data-config-season="${escapeHtml(x.seasonId)}">Configurar</button> ${x.seasonId===sd.activeSeasonId?'':`<button type="button" class="button mini secondary" data-activate-season="${escapeHtml(x.seasonId)}">Activar</button>`}</td></tr>`).join('');
-    const host=document.getElementById('season-manager-content');
-    host.innerHTML=`${rows?`<div class="table-wrap"><table><thead><tr><th>Temporada</th><th>Estado</th><th>Datos deportivos</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty-state">No hay temporadas todavía.</div>'}<div class="section-divider"></div><form id="new-season-form" class="form-grid three"><input id="new-season-id" type="hidden"><label>Nombre<input id="new-season-name" placeholder="2027/2028" required></label><label>Inicio<input id="new-season-start" type="date"></label><label>Fin<input id="new-season-end" type="date"></label><label>Estado<select id="new-season-status"><option value="PLANNED">Planificada</option><option value="INACTIVE">Inactiva</option><option value="CLOSED">Cerrada</option></select></label><label class="check-row"><input id="new-season-activate" type="checkbox"> Activar al guardar</label><div><button class="button secondary" type="button" id="cancel-season-edit" hidden>Cancelar</button> <button class="button primary" type="submit" id="save-season-button">Crear temporada</button></div></form><div id="season-message" class="message"></div><div id="season-division-config"></div>`;
-    document.querySelectorAll('[data-activate-season]').forEach(b=>b.onclick=async()=>{try{await call('setActiveSeason',{seasonId:b.dataset.activateSeason});clubConfig=null;showToast_('Temporada activa actualizada.');await renderClubSettings();}catch(err){showMessage(err.message,'error','season-message');}});
-    document.querySelectorAll('[data-config-season]').forEach(b=>b.onclick=()=>renderSeasonDivisionConfig_(sd,b.dataset.configSeason));
-    const seasonForm=document.getElementById('new-season-form');
-    const resetSeasonForm=()=>{seasonForm.reset();document.getElementById('new-season-id').value='';document.getElementById('save-season-button').textContent='Crear temporada';document.getElementById('cancel-season-edit').hidden=true;};
-    document.querySelectorAll('[data-edit-season]').forEach(b=>b.onclick=()=>{const x=list.find(s0=>s0.seasonId===b.dataset.editSeason);if(!x)return;document.getElementById('new-season-id').value=x.seasonId;document.getElementById('new-season-name').value=x.name||'';document.getElementById('new-season-start').value=x.startDate||'';document.getElementById('new-season-end').value=x.endDate||'';document.getElementById('new-season-status').value=x.status==='ACTIVE'?'INACTIVE':(x.status||'PLANNED');document.getElementById('new-season-activate').checked=x.seasonId===sd.activeSeasonId;document.getElementById('save-season-button').textContent='Guardar temporada';document.getElementById('cancel-season-edit').hidden=false;seasonForm.scrollIntoView({behavior:'smooth',block:'center'});});
-    document.getElementById('cancel-season-edit').onclick=resetSeasonForm;
-    seasonForm.onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;try{const seasonId=val('new-season-id');await call('saveSeason',{seasonId,name:val('new-season-name'),startDate:val('new-season-start'),endDate:val('new-season-end'),status:val('new-season-status'),activate:document.getElementById('new-season-activate').checked});clubConfig=null;showToast_(seasonId?'Temporada actualizada.':'Temporada creada.');await renderClubSettings();}catch(err){showMessage(err.message,'error','season-message');if(button)button.disabled=false;}};
-  } catch(err) { const host=document.getElementById('season-manager-content'); if(host) host.innerHTML=`<div class="message error">${escapeHtml(err.message)}</div>`; }
 
   wireColorPair('primary');
   wireColorPair('secondary');
@@ -523,11 +561,6 @@ async function renderClubSettings() {
         primaryColor: document.getElementById('primary-text').value.trim(),
         secondaryColor: document.getElementById('secondary-text').value.trim(),
         accentColor: document.getElementById('accent-text').value.trim(),
-        season: {
-          name: document.getElementById('season-name').value.trim(),
-          startDate: document.getElementById('season-start').value,
-          endDate: document.getElementById('season-end').value
-        },
         logoDataUrl: selectedLogo?.dataUrl || '',
         logoOriginalName: selectedLogo?.file?.name || '',
         removeLogo
@@ -546,7 +579,7 @@ async function renderClubSettings() {
 
 
 async function loadStructureData() {
-  const { data } = await call('getStructureData');
+  const { data } = await call('getStructureData',{seasonId:selectedSeasonId_()});
   structureData = data;
   return data;
 }
@@ -592,7 +625,7 @@ async function renderStructure(section = structureSection) {
     <section class="hero compact">
       <span class="eyebrow">Estructura deportiva</span>
       <h1>Personas y organización</h1>
-      <p>La vista muestra la temporada activa. Personas, cargos y divisiones son maestras; equipos, asignaciones, reglas de duración, calendario y estadísticas se gestionan por temporada.</p>
+      <p>La vista usa la temporada elegida en la cabecera. Personas, cargos y divisiones son maestras; equipos, asignaciones, calendario y estadísticas se gestionan por temporada.</p>
     </section>
     ${structureTabs()}
     ${content}
@@ -637,7 +670,7 @@ function renderDivisionsSection() {
     const teamHtml=own.length?own.map(t=>`<span class="badge active">${escapeHtml(t.name)}</span> <button class="button mini secondary" data-edit-team="${escapeHtml(t.teamId)}">Editar</button>`).join('<br>'):'<span class="muted">Sin equipos creados</span>';
     return `<tr><td><strong><span class="division-color-dot" style="--division-color:${escapeHtml(item.color||'#2563EB')}"></span>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.code || '')}</small></td><td>${teamHtml}<div style="margin-top:.45rem"><button class="button mini primary" data-new-team-division="${escapeHtml(item.divisionId)}">+ Equipo</button></div></td><td>${statusBadge(item.status)}</td><td><button class="button mini secondary" data-edit-division="${escapeHtml(item.divisionId)}">Editar división</button></td></tr>`;
   }).join('');
-  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones y equipos</h2><p>La división es maestra y estable. Los equipos A/B mostrados pertenecen a la temporada activa; las reglas de duración se configuran en Configuración → Temporadas.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipos</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones para la temporada activa.')}<div id="editor-host"></div></section>`;
+  return `<section class="panel management-panel"><div class="panel-heading"><div><h2>Divisiones y equipos</h2><p>La división es maestra y estable. Los equipos A/B mostrados pertenecen a la temporada seleccionada; las reglas de duración se configuran en Temporadas.</p></div><button class="button primary" id="new-division">Nueva división</button></div>${divisions.length ? `<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipos</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay divisiones activas para la temporada seleccionada.')}<div id="editor-host"></div></section>`;
 }
 
 function renderTeamsSection() {
@@ -721,13 +754,13 @@ function showDivisionEditor(item = {}) {
   editorShell(item.divisionId ? 'Editar división' : 'Nueva división', 'La división es un registro maestro estable entre temporadas. Equipos y reglas de duración se configuran por temporada.', `<div class="form-grid three"><label>Nombre<input id="division-name" maxlength="100" required value="${escapeHtml(item.name || '')}"></label><label>Código<input id="division-code" maxlength="30" value="${escapeHtml(item.code || '')}" placeholder="M16"></label><label>Color base<input id="division-color" type="color" value="${escapeHtml(item.color || '#2563EB')}"></label></div><label>Estado<select id="division-status"><option value="ACTIVE" ${item.status !== 'INACTIVE' ? 'selected' : ''}>Activa</option><option value="INACTIVE" ${item.status === 'INACTIVE' ? 'selected' : ''}>Inactiva</option></select></label><small>Los minutos de partido único/triangular/cuadrangular ya no se guardan aquí: pertenecen a Temporada + División.</small><div id="division-color-preview" class="division-color-preview"></div>`);
   const renderDivisionColorPreview=()=>{const base=val('division-color')||'#2563EB',v=divisionColorVariants_(base);const host=document.getElementById('division-color-preview');if(host)host.innerHTML=`<div class="division-swatch strong" style="--swatch:${escapeHtml(v.strong)}"><strong>Partido</strong><small>Fuerte</small></div><div class="division-swatch medium" style="--swatch:${escapeHtml(v.medium)}"><strong>Entrenamiento</strong><small>Medio</small></div><div class="division-swatch light" style="--swatch:${escapeHtml(v.light)}"><strong>Descanso</strong><small>Suave</small></div>`;};
   document.getElementById('division-color').oninput=renderDivisionColorPreview;renderDivisionColorPreview();
-  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveDivision', { divisionId: item.divisionId || '', name: val('division-name'), code: val('division-code'), color: val('division-color'), status: val('division-status') });
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveDivision', { divisionId: item.divisionId || '', seasonId: structureData.selectedSeasonId || structureData.activeSeasonId || selectedSeasonId_(), name: val('division-name'), code: val('division-code'), color: val('division-color'), status: val('division-status') });
 }
 
 function showTeamEditor(item = {}) {
   const divisions = (structureData.divisions || []).filter(x => x.status === 'ACTIVE' || x.divisionId === item.divisionId);
   editorShell(item.teamId ? 'Editar equipo' : 'Nuevo equipo', 'El color lo hereda de la división. El patrón se usa en partidos y descansos para distinguir A/B; los entrenamientos siguen siendo de división.', `<label>División<select id="team-division" required>${optionList(divisions, 'divisionId', x => x.name, item.divisionId || '', false)}</select></label><div class="form-grid two"><label>Nombre<input id="team-name" maxlength="100" required value="${escapeHtml(item.name || '')}"></label><label>Código<input id="team-code" maxlength="30" value="${escapeHtml(item.code || '')}"></label></div><div class="form-grid two"><label>Patrón visual<select id="team-pattern"><option value="SOLID" ${(item.displayPattern||'SOLID')==='SOLID'?'selected':''}>Sólido (Equipo A)</option><option value="STRIPED" ${item.displayPattern==='STRIPED'?'selected':''}>Rayado (Equipo B)</option><option value="DOTTED" ${item.displayPattern==='DOTTED'?'selected':''}>Punteado</option></select></label><div class="team-pattern-preview"><span class="pattern-sample solid">A</span><span class="pattern-sample striped">B</span><span class="pattern-sample dotted">C</span></div></div><label>Estado<select id="team-status"><option value="ACTIVE" ${item.status !== 'INACTIVE' ? 'selected' : ''}>Activo</option><option value="INACTIVE" ${item.status === 'INACTIVE' ? 'selected' : ''}>Inactivo</option></select></label>`);
-  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveTeam', { teamId: item.teamId || '', divisionId: val('team-division'), name: val('team-name'), code: val('team-code'), displayPattern: val('team-pattern'), status: val('team-status') });
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveTeam', { teamId: item.teamId || '', seasonId: item.seasonId || structureData.selectedSeasonId || structureData.activeSeasonId || selectedSeasonId_(), divisionId: val('team-division'), name: val('team-name'), code: val('team-code'), displayPattern: val('team-pattern'), status: val('team-status') });
 }
 
 function showAssignmentEditor(item = {}) {
@@ -735,7 +768,7 @@ function showAssignmentEditor(item = {}) {
   const activeRoles = (structureData.roles || []).filter(x => x.status === 'ACTIVE' || x.roleId === item.roleId);
   const activeDivisions = (structureData.divisions || []).filter(x => x.status === 'ACTIVE' || x.divisionId === item.divisionId);
   editorShell(item.assignmentId ? 'Editar asignación' : 'Nueva asignación', 'Una persona puede tener varios cargos y varias divisiones. A/B se decide en cada partido, no aquí.', `<div class="form-grid two"><label>Persona<select id="assignment-person" required>${optionList(activePeople,'personId',x=>x.displayName,item.personId||'',false)}</select></label><label>Cargo<select id="assignment-role" required>${optionList(activeRoles,'roleId',x=>x.name,item.roleId||'',false)}</select></label></div><label>División<select id="assignment-division">${optionList(activeDivisions,'divisionId',x=>x.name,item.divisionId||'')}</select><small>Vacía = función transversal.</small></label><div class="form-grid two"><label>Desde<input id="assignment-start" type="date" value="${escapeHtml(item.startDate || '')}"></label><label>Hasta<input id="assignment-end" type="date" value="${escapeHtml(item.endDate || '')}"></label></div><label>Estado<select id="assignment-status"><option value="ACTIVE" ${item.status !== 'ENDED' ? 'selected' : ''}>Activa</option><option value="ENDED" ${item.status === 'ENDED' ? 'selected' : ''}>Finalizada</option></select></label><label>Notas<textarea id="assignment-notes" maxlength="500" rows="3">${escapeHtml(item.notes || '')}</textarea></label>`);
-  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: val('assignment-division'), seasonId: item.seasonId || structureData.activeSeasonId || '', startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
+  document.getElementById('entity-form').onsubmit = event => submitEntity(event, 'saveAssignment', { assignmentId: item.assignmentId || '', personId: val('assignment-person'), roleId: val('assignment-role'), divisionId: val('assignment-division'), seasonId: item.seasonId || structureData.selectedSeasonId || structureData.activeSeasonId || selectedSeasonId_(), startDate: val('assignment-start'), endDate: val('assignment-end'), status: val('assignment-status'), notes: val('assignment-notes') });
 }
 
 function val(id) { return document.getElementById(id)?.value?.trim?.() ?? document.getElementById(id)?.value ?? ''; }
@@ -760,7 +793,7 @@ function renderSeasonDivisionConfig_(seasonData,seasonId){
   const host=document.getElementById('season-division-config');if(!host)return;const season=(seasonData.seasons||[]).find(x=>x.seasonId===seasonId)||{},settings=seasonData.seasonDivisionSettings||[],teams=seasonData.teams||[];
   const byDivision={};settings.filter(x=>x.seasonId===seasonId).forEach(x=>byDivision[x.divisionId]=x);
   const rows=(seasonData.divisions||[]).filter(d=>d.status==='ACTIVE').map(d=>{const st=byDivision[d.divisionId]||{},own=teams.filter(t=>t.seasonId===seasonId&&t.divisionId===d.divisionId&&t.status==='ACTIVE');return `<tr><td><strong>${escapeHtml(d.name)}</strong><small>${escapeHtml(d.code||'')}</small></td><td>${st.status==='INACTIVE'?'<span class="badge inactive">No usada</span>':'<span class="badge active">Activa</span>'}</td><td>${escapeHtml(st.defaultMatchMinutes||'—')}${st.defaultHalfMinutes?` (${escapeHtml(st.defaultHalfMinutes)}+${escapeHtml(st.defaultHalfMinutes)})`:''}</td><td>${escapeHtml(st.triangularMatchMinutes||'—')}${st.triangularHalfMinutes?` (${escapeHtml(st.triangularHalfMinutes)}+${escapeHtml(st.triangularHalfMinutes)})`:''}</td><td>${escapeHtml(st.quadrangularMatchMinutes||'—')}${st.quadrangularHalfMinutes?` (${escapeHtml(st.quadrangularHalfMinutes)}+${escapeHtml(st.quadrangularHalfMinutes)})`:''}</td><td>${own.length?own.map(t=>escapeHtml(t.name)).join(' · '):'Sin equipos'}</td><td><button class="button mini secondary" data-season-division-edit="${escapeHtml(d.divisionId)}">Editar reglas</button></td></tr>`;}).join('');
-  host.innerHTML=`<div class="section-divider"></div><div class="section-heading"><h3>${escapeHtml(season.name||'Temporada')} · configuración deportiva</h3><p>Los tiempos pertenecen a esta temporada. Los equipos se crean desde Estructura → Divisiones y equipos cuando la temporada está activa.</p></div><div class="table-wrap"><table><thead><tr><th>División</th><th>Uso</th><th>Partido único</th><th>Triangular</th><th>Cuadrangular</th><th>Equipos</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div id="season-division-editor"></div>`;
+  host.innerHTML=`<div class="section-divider"></div><div class="section-heading"><h3>${escapeHtml(season.name||'Temporada')} · configuración deportiva</h3><p>Los tiempos pertenecen a esta temporada. Los equipos se crean desde Estructura → Divisiones y equipos seleccionando esta temporada en la cabecera.</p></div><div class="table-wrap"><table><thead><tr><th>División</th><th>Uso</th><th>Partido único</th><th>Triangular</th><th>Cuadrangular</th><th>Equipos</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div id="season-division-editor"></div>`;
   host.querySelectorAll('[data-season-division-edit]').forEach(b=>b.onclick=()=>openSeasonDivisionRuleEditor_(seasonData,seasonId,b.dataset.seasonDivisionEdit));host.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function openSeasonDivisionRuleEditor_(seasonData,seasonId,divisionId){
@@ -948,6 +981,7 @@ async function start() {
     const { data } = await call('status');
     currentUser = { email: data.actor.email, displayName:data.actor.displayName||'', role: data.actor.role, personId: data.actor.personId || '' };
     await loadClubConfig();
+    await loadSeasonContext_(true);
     await renderDashboard();
   } catch (error) {
     if (!sessionToken) return renderLogin();
@@ -1072,19 +1106,19 @@ function statsNumber_(value){return Number(value||0).toLocaleString('es-ES');}
 function statisticsResultLabel_(m){const pf=Number(m.resultFor||0),pa=Number(m.resultAgainst||0);return pf>pa?'Victoria':pf<pa?'Derrota':'Empate';}
 async function renderStatistics(filters={}){
   try{
-    const previous=loadUiState_().statisticsFilters||{};const requested=Object.keys(filters||{}).length?filters:previous;const {data}=await call('getStatisticsData',requested);statisticsData=data;const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x])),teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x]));const f=data.filters||{},summary=data.summary||{};
-    const seasonOptions=`<option value="">Todas</option>`+(data.seasons||[]).map(x=>`<option value="${escapeHtml(x.seasonId)}" ${x.seasonId===f.seasonId?'selected':''}>${escapeHtml(x.name)}</option>`).join(''),divisionOptions=`<option value="">Todas</option>`+(data.divisions||[]).filter(x=>x.status==='ACTIVE'||x.divisionId===f.divisionId).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${x.divisionId===f.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join(''),scopedTeams=(data.teams||[]).filter(x=>!f.divisionId||x.divisionId===f.divisionId),teamOptions=`<option value="">Todos</option>`+scopedTeams.map(x=>`<option value="${escapeHtml(x.teamId)}" ${x.teamId===f.teamId?'selected':''}>${escapeHtml(x.name)}</option>`).join('');
+    const previous=loadUiState_().statisticsFilters||{};const requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_()});const {data}=await call('getStatisticsData',requested);statisticsData=data;const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x])),teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x]));const f=data.filters||{},summary=data.summary||{};
+    const divisionOptions=`<option value="">Todas</option>`+(data.divisions||[]).filter(x=>x.status==='ACTIVE'||x.divisionId===f.divisionId).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${x.divisionId===f.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join(''),scopedTeams=(data.teams||[]).filter(x=>!f.divisionId||x.divisionId===f.divisionId),teamOptions=`<option value="">Todos</option>`+scopedTeams.map(x=>`<option value="${escapeHtml(x.teamId)}" ${x.teamId===f.teamId?'selected':''}>${escapeHtml(x.name)}</option>`).join('');
     const playerRows=(data.players||[]).map((p,i)=>`<tr><td><span class="rank-number">${i+1}</span></td><td><strong>${escapeHtml(p.playerName)}</strong>${p.licenseNumber?`<small>Lic. ${escapeHtml(p.licenseNumber)}</small>`:''}</td><td>${p.matches}</td><td>${p.starts}</td><td>${p.bench}</td><td>${statsNumber_(p.minutes)}<small>${statsNumber_(p.availableMinutes)} disp. · ${statsNumber_(p.participationPct)}%</small></td><td><strong>${p.points}</strong><small>${statsNumber_(p.pointsPerMatch)}/PJ</small></td><td>${p.tries}</td><td>${p.conversions}</td><td>${p.penalties}</td><td>${p.drops}</td><td>${p.yellowCards}</td><td>${p.redCards}</td><td>${p.captaincies}</td></tr>`).join('');
     const breakdownRows=(data.breakdown||[]).map(b=>`<tr><td>${escapeHtml(b.divisionName)}</td><td>${escapeHtml(b.teamName)}</td><td>${b.matches}</td><td>${b.wins}-${b.draws}-${b.losses}</td><td>${statsNumber_(b.winRate)}%</td><td>${b.pointsFor}</td><td>${b.pointsAgainst}</td><td>${b.difference>0?'+':''}${b.difference}</td></tr>`).join('');
     const matchRows=(data.recentMatches||[]).map(m=>`<tr data-stats-event="${escapeHtml(m.eventId)}" data-stats-season="${escapeHtml(m.seasonId||'')}" class="clickable-row"><td>${escapeHtml(m.eventDate)}</td><td>${escapeHtml((divMap[m.divisionId]||{}).name||'—')}</td><td>${escapeHtml((teamMap[m.teamId]||{}).name||'—')}</td><td>${escapeHtml(m.condition==='HOME'?'Local':m.condition==='AWAY'?'Visitante':'—')}</td><td><strong>${escapeHtml(m.opponent||'—')}</strong><small>${escapeHtml([m.competition,m.roundName].filter(Boolean).join(' · '))}</small></td><td><strong>${escapeHtml(m.resultFor||'0')} - ${escapeHtml(m.resultAgainst||'0')}</strong></td><td>${statisticsResultLabel_(m)}</td></tr>`).join('');
-    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento</span><h1>Estadísticas</h1><p>Rendimiento individual, por división/equipo y por partido.</p></section><section class="panel stats-filter-panel"><div class="form-grid three"><label>Temporada<select id="stats-season">${seasonOptions}</select></label><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label><label>Desde<input id="stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label><label>Condición<select id="stats-condition"><option value="">Local y visitante</option><option value="HOME" ${f.condition==='HOME'?'selected':''}>Local</option><option value="AWAY" ${f.condition==='AWAY'?'selected':''}>Visitante</option></select></label><label>Competición<select id="stats-competition"><option value="">Todas</option>${(data.competitions||[]).map(x=>`<option value="${escapeHtml(x)}" ${f.competition===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select></label><label class="filter-grow">Rival<input id="stats-opponent" value="${escapeHtml(f.opponent||'')}" placeholder="Buscar rival"></label><div><button class="button secondary" id="stats-clear">Limpiar filtros</button></div></div></section><section class="stats-summary-grid"><article class="metric-card"><span>Partidos</span><strong>${statsNumber_(summary.matches)}</strong><small>${summary.wins||0} V · ${summary.draws||0} E · ${summary.losses||0} D · ${statsNumber_(summary.winRate)}%</small></article><article class="metric-card"><span>Puntos</span><strong>${summary.pointsFor||0} : ${summary.pointsAgainst||0}</strong><small>${statsNumber_(summary.pointsForPerMatch)} PF/PJ · ${statsNumber_(summary.pointsAgainstPerMatch)} PC/PJ</small></article><article class="metric-card"><span>Jugadores</span><strong>${statsNumber_(summary.players)}</strong><small>${statsNumber_(summary.totalMinutes)} min acumulados</small></article><article class="metric-card"><span>Disciplina</span><strong>${summary.yellowCards||0} 🟨 · ${summary.redCards||0} 🟥</strong><small>Actas consolidadas</small></article></section><section class="panel"><div class="panel-heading"><div><h2>División / equipo</h2><p>Resumen comparativo dentro del filtro actual.</p></div></div>${breakdownRows?`<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipo</th><th>PJ</th><th>V-E-D</th><th>% V</th><th>PF</th><th>PC</th><th>Dif.</th></tr></thead><tbody>${breakdownRows}</tbody></table></div>`:emptyTable('No hay datos agregados para este filtro.')}</section><section class="panel"><div class="panel-heading"><div><h2>Estadísticas individuales</h2><p>Incluye promedios, formas de anotación, disciplina y capitanías.</p></div></div>${playerRows?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>#</th><th>Jugador</th><th>PJ</th><th>Tit.</th><th>Sup.</th><th>Min.</th><th>Pts.</th><th>Ens.</th><th>Transf.</th><th>Pen.</th><th>Drop</th><th>🟨</th><th>🟥</th><th>Cap.</th></tr></thead><tbody>${playerRows}</tbody></table></div>`:emptyTable('Todavía no hay estadísticas oficiales para este filtro.')}</section><section class="panel"><div class="panel-heading"><div><h2>Partidos</h2><p>Hasta 50 partidos incluidos en el cálculo.</p></div></div>${matchRows?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>División</th><th>Equipo</th><th>Condición</th><th>Rival / competición</th><th>Resultado</th><th></th></tr></thead><tbody>${matchRows}</tbody></table></div>`:emptyTable('No hay partidos finalizados en este filtro.')}</section>`,'statistics');
-    const collect=()=>({seasonId:val('stats-season'),divisionId:val('stats-division'),teamId:val('stats-team'),fromDate:val('stats-from'),toDate:val('stats-to'),condition:val('stats-condition'),competition:val('stats-competition'),opponent:val('stats-opponent')});const reload=()=>{const next=collect();saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};['stats-season','stats-team','stats-from','stats-to','stats-condition','stats-competition'].forEach(id=>document.getElementById(id).onchange=reload);document.getElementById('stats-division').onchange=()=>{const next=collect();next.teamId='';saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};document.getElementById('stats-opponent').addEventListener('change',reload);document.getElementById('stats-opponent').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();reload();}});document.getElementById('stats-clear').onclick=()=>{saveUiStatePatch_({statisticsFilters:{}});renderStatistics({});};document.querySelectorAll('[data-stats-event]').forEach(row=>row.onclick=()=>renderEventDetail(row.dataset.statsEvent));
-  }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar las estadísticas</h1><p>${escapeHtml(err.message)}</p></section>`,'statistics');}
+    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento</span><h1>Estadísticas</h1><p>Rendimiento individual, por división/equipo y por partido.</p></section><section class="panel stats-filter-panel"><div class="form-grid three"><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label><label>Desde<input id="stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label><label>Condición<select id="stats-condition"><option value="">Local y visitante</option><option value="HOME" ${f.condition==='HOME'?'selected':''}>Local</option><option value="AWAY" ${f.condition==='AWAY'?'selected':''}>Visitante</option></select></label><label>Competición<select id="stats-competition"><option value="">Todas</option>${(data.competitions||[]).map(x=>`<option value="${escapeHtml(x)}" ${f.competition===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select></label><label class="filter-grow">Rival<input id="stats-opponent" value="${escapeHtml(f.opponent||'')}" placeholder="Buscar rival"></label><div><button class="button secondary" id="stats-clear">Limpiar filtros</button></div></div></section><section class="stats-summary-grid"><article class="metric-card"><span>Partidos</span><strong>${statsNumber_(summary.matches)}</strong><small>${summary.wins||0} V · ${summary.draws||0} E · ${summary.losses||0} D · ${statsNumber_(summary.winRate)}%</small></article><article class="metric-card"><span>Puntos</span><strong>${summary.pointsFor||0} : ${summary.pointsAgainst||0}</strong><small>${statsNumber_(summary.pointsForPerMatch)} PF/PJ · ${statsNumber_(summary.pointsAgainstPerMatch)} PC/PJ</small></article><article class="metric-card"><span>Jugadores</span><strong>${statsNumber_(summary.players)}</strong><small>${statsNumber_(summary.totalMinutes)} min acumulados</small></article><article class="metric-card"><span>Disciplina</span><strong>${summary.yellowCards||0} 🟨 · ${summary.redCards||0} 🟥</strong><small>Actas consolidadas</small></article></section><section class="panel"><div class="panel-heading"><div><h2>División / equipo</h2><p>Resumen comparativo dentro del filtro actual.</p></div></div>${breakdownRows?`<div class="table-wrap"><table><thead><tr><th>División</th><th>Equipo</th><th>PJ</th><th>V-E-D</th><th>% V</th><th>PF</th><th>PC</th><th>Dif.</th></tr></thead><tbody>${breakdownRows}</tbody></table></div>`:emptyTable('No hay datos agregados para este filtro.')}</section><section class="panel"><div class="panel-heading"><div><h2>Estadísticas individuales</h2><p>Incluye promedios, formas de anotación, disciplina y capitanías.</p></div></div>${playerRows?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>#</th><th>Jugador</th><th>PJ</th><th>Tit.</th><th>Sup.</th><th>Min.</th><th>Pts.</th><th>Ens.</th><th>Transf.</th><th>Pen.</th><th>Drop</th><th>🟨</th><th>🟥</th><th>Cap.</th></tr></thead><tbody>${playerRows}</tbody></table></div>`:emptyTable('Todavía no hay estadísticas oficiales para este filtro.')}</section><section class="panel"><div class="panel-heading"><div><h2>Partidos</h2><p>Hasta 50 partidos incluidos en el cálculo.</p></div></div>${matchRows?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>División</th><th>Equipo</th><th>Condición</th><th>Rival / competición</th><th>Resultado</th><th></th></tr></thead><tbody>${matchRows}</tbody></table></div>`:emptyTable('No hay partidos finalizados en este filtro.')}</section>`,'statistics');
+    const collect=()=>({seasonId:selectedSeasonId_(),divisionId:val('stats-division'),teamId:val('stats-team'),fromDate:val('stats-from'),toDate:val('stats-to'),condition:val('stats-condition'),competition:val('stats-competition'),opponent:val('stats-opponent')});const reload=()=>{const next=collect();saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};['stats-team','stats-from','stats-to','stats-condition','stats-competition'].forEach(id=>document.getElementById(id).onchange=reload);document.getElementById('stats-division').onchange=()=>{const next=collect();next.teamId='';saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};document.getElementById('stats-opponent').addEventListener('change',reload);document.getElementById('stats-opponent').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();reload();}});document.getElementById('stats-clear').onclick=()=>{saveUiStatePatch_({statisticsFilters:{seasonId:selectedSeasonId_()}});renderStatistics({seasonId:selectedSeasonId_()});};document.querySelectorAll('[data-stats-event]').forEach(row=>row.onclick=()=>renderEventDetail(row.dataset.statsEvent));
+  }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar las estadísticas</h1><p>${escapeHtml(err.message)}</p><button class="button primary" id="stats-retry">Reintentar</button></section>`,'statistics');document.getElementById('stats-retry')?.addEventListener('click',()=>renderStatistics());}
 }
 
 async function renderCalendar(){
   const state=loadUiState_().calendarFilters||{};
-  try{const {data}=await call('getCalendarData',{seasonId:state.seasonId||''});calendarData=data;}catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
+  try{const {data}=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=data;}catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
   const d=calendarData;
   if(!calendarViewTouched&&loadUiState_().calendarView)calendarView=loadUiState_().calendarView;
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
@@ -1092,7 +1126,7 @@ async function renderCalendar(){
   const renderCurrentCalendar=(events)=>calendarView==='month'?renderMonthGrid(events):calendarView==='week'?renderWeekGrid(events):renderAgenda(events);
   shell(`<section class="hero compact"><span class="eyebrow">Actividad deportiva</span><h1>Calendario</h1><p>Entrenamientos y partidos en una única vista.</p></section>
   <section class="panel"><div class="calendar-toolbar"><div class="button-row"><button class="button secondary" id="cal-prev">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row"><button class="button ${calendarView==='agenda'?'primary':'secondary'}" id="cal-agenda">Agenda</button><button class="button ${calendarView==='month'?'primary':'secondary'}" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'}" id="cal-week">Semana</button>${d.canImportLeague?'<button class="button secondary" id="import-league">Importar liga</button>':''}${['ADMIN','MANAGER'].includes(currentUser?.role)?'<button class="button secondary" id="maintain-reports">Actualizar actas</button>':''}${d.canCreate?'<button class="button primary" id="new-event">Nueva actividad</button>':''}</div></div>
-  <div class="filter-bar calendar-filters"><label>Temporada<select id="cal-filter-season">${(d.seasons||[]).map(x=>`<option value="${escapeHtml(x.seasonId)}" ${x.seasonId===(d.selectedSeasonId||d.activeSeasonId)?'selected':''}>${escapeHtml(x.name)}${x.seasonId===d.activeSeasonId?' · activa':''}</option>`).join('')}</select></label><label>División<select id="cal-filter-division"><option value="">Todas las divisiones</option>${(d.divisions||[]).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${state.divisionId===x.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></label><label id="cal-filter-team-wrap">Equipo<select id="cal-filter-team"><option value="">Todos los equipos</option></select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING" ${state.type==='TRAINING'?'selected':''}>Entrenamientos</option><option value="MATCH" ${state.type==='MATCH'?'selected':''}>Partidos</option><option value="REST" ${state.type==='REST'?'selected':''}>Descansos</option></select></label><label>Estado<select id="cal-filter-status"><option value="">Todos</option>${['SCHEDULED','COMPLETED','POSTPONED','CANCELLED'].map(x=>`<option value="${x}" ${state.status===x?'selected':''}>${escapeHtml(eventStatusLabel(x))}</option>`).join('')}</select></label><label>Acta<select id="cal-filter-report"><option value="">Todas</option><option value="WITH" ${state.report==='WITH'?'selected':''}>Con acta</option><option value="WITHOUT" ${state.report==='WITHOUT'?'selected':''}>Sin acta</option></select></label><label class="filter-grow">Rival / título<input id="cal-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Buscar partido o rival"></label><button class="button secondary filter-clear" id="cal-filter-clear">Limpiar</button></div>
+  <div class="filter-bar calendar-filters"><label>División<select id="cal-filter-division"><option value="">Todas las divisiones</option>${(d.divisions||[]).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${state.divisionId===x.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></label><label id="cal-filter-team-wrap">Equipo<select id="cal-filter-team"><option value="">Todos los equipos</option></select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING" ${state.type==='TRAINING'?'selected':''}>Entrenamientos</option><option value="MATCH" ${state.type==='MATCH'?'selected':''}>Partidos</option><option value="REST" ${state.type==='REST'?'selected':''}>Descansos</option></select></label><label>Estado<select id="cal-filter-status"><option value="">Todos</option>${['SCHEDULED','COMPLETED','POSTPONED','CANCELLED'].map(x=>`<option value="${x}" ${state.status===x?'selected':''}>${escapeHtml(eventStatusLabel(x))}</option>`).join('')}</select></label><label>Acta<select id="cal-filter-report"><option value="">Todas</option><option value="WITH" ${state.report==='WITH'?'selected':''}>Con acta</option><option value="WITHOUT" ${state.report==='WITHOUT'?'selected':''}>Sin acta</option></select></label><label class="filter-grow">Rival / título<input id="cal-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Buscar partido o rival"></label><button class="button secondary filter-clear" id="cal-filter-clear">Limpiar</button></div>
   <div id="calendar-host"></div><div id="message" class="message"></div></section>`,'calendar');
   const move=n=>{calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+(calendarView==='month'?n:0),calendarCursor.getDate()+((calendarView==='week'||calendarView==='agenda')?7*n:0));renderCalendar();};
   document.getElementById('cal-prev').onclick=()=>move(-1);document.getElementById('cal-next').onclick=()=>move(1);document.getElementById('cal-today').onclick=()=>{calendarCursor=new Date();renderCalendar();};
@@ -1100,9 +1134,9 @@ async function renderCalendar(){
   const ib=document.getElementById('import-league');if(ib)ib.onclick=renderLeagueImport;const nb=document.getElementById('new-event');if(nb)nb.onclick=()=>renderEventEditor();const mb=document.getElementById('maintain-reports');if(mb)mb.onclick=renderReportMaintenance_;
   const teamWrap=document.getElementById('cal-filter-team-wrap'),teamSelect=document.getElementById('cal-filter-team');
   const syncCalendarTeams=()=>{const div=val('cal-filter-division');const teams=div?(d.teams||[]).filter(t=>t.divisionId===div):[];teamWrap.hidden=!div;teamSelect.innerHTML='<option value="">Todos los equipos</option>'+teams.map(t=>`<option value="${escapeHtml(t.teamId)}" ${state.teamId===t.teamId?'selected':''}>${escapeHtml(t.name)}</option>`).join('');if(!div)teamSelect.value='';};
-  const applyFilters=()=>{const f={seasonId:val('cal-filter-season'),divisionId:val('cal-filter-division'),teamId:val('cal-filter-team'),type:val('cal-filter-type'),status:val('cal-filter-status'),report:val('cal-filter-report'),q:val('cal-filter-q')};saveUiStatePatch_({calendarFilters:f});const q=textNorm_(f.q);const filtered=d.events.filter(e=>(!f.divisionId||e.divisionId===f.divisionId)&&(!f.teamId||e.teamId===f.teamId||(e.eventType==='TRAINING'&&e.divisionId===f.divisionId&&!e.teamId))&&(!f.type||e.eventType===f.type)&&(!f.status||e.status===f.status)&&(!f.report||(f.report==='WITH'?reportSet.has(e.eventId):!reportSet.has(e.eventId)))&&(!q||textNorm_([e.title,e.opponent,e.competition,e.location].join(' ')).includes(q)));document.getElementById('calendar-host').innerHTML=renderCurrentCalendar(filtered);document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));};
+  const applyFilters=()=>{const f={divisionId:val('cal-filter-division'),teamId:val('cal-filter-team'),type:val('cal-filter-type'),status:val('cal-filter-status'),report:val('cal-filter-report'),q:val('cal-filter-q')};saveUiStatePatch_({calendarFilters:f});const q=textNorm_(f.q);const filtered=d.events.filter(e=>(!f.divisionId||e.divisionId===f.divisionId)&&(!f.teamId||e.teamId===f.teamId||(e.eventType==='TRAINING'&&e.divisionId===f.divisionId&&!e.teamId))&&(!f.type||e.eventType===f.type)&&(!f.status||e.status===f.status)&&(!f.report||(f.report==='WITH'?reportSet.has(e.eventId):!reportSet.has(e.eventId)))&&(!q||textNorm_([e.title,e.opponent,e.competition,e.location].join(' ')).includes(q)));document.getElementById('calendar-host').innerHTML=renderCurrentCalendar(filtered);document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));};
   syncCalendarTeams();applyFilters();
-  document.getElementById('cal-filter-season').onchange=()=>{const next=Object.assign({},loadUiState_().calendarFilters||{},{seasonId:val('cal-filter-season'),divisionId:'',teamId:''});saveUiStatePatch_({calendarFilters:next});calendarData=null;renderCalendar();};document.getElementById('cal-filter-division').onchange=()=>{state.teamId='';syncCalendarTeams();applyFilters();};teamSelect.onchange=applyFilters;document.getElementById('cal-filter-type').onchange=applyFilters;document.getElementById('cal-filter-status').onchange=applyFilters;document.getElementById('cal-filter-report').onchange=applyFilters;document.getElementById('cal-filter-q').onchange=applyFilters;document.getElementById('cal-filter-q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();applyFilters();}};document.getElementById('cal-filter-clear').onclick=()=>{saveUiStatePatch_({calendarFilters:{seasonId:d.activeSeasonId||''}});renderCalendar();};
+  document.getElementById('cal-filter-division').onchange=()=>{state.teamId='';syncCalendarTeams();applyFilters();};teamSelect.onchange=applyFilters;document.getElementById('cal-filter-type').onchange=applyFilters;document.getElementById('cal-filter-status').onchange=applyFilters;document.getElementById('cal-filter-report').onchange=applyFilters;document.getElementById('cal-filter-q').onchange=applyFilters;document.getElementById('cal-filter-q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();applyFilters();}};document.getElementById('cal-filter-clear').onclick=()=>{saveUiStatePatch_({calendarFilters:{}});renderCalendar();};
 }
 
 async function renderReportMaintenance_(){
@@ -1121,7 +1155,7 @@ function eventEditorParticipants(e){
   return d.persons.map(p=>`<label class="participant-choice"><input type="checkbox" data-event-person="${p.personId}" ${selected[p.personId]?'checked':''}><span>${escapeHtml(p.displayName)}</span><select data-event-person-type="${p.personId}"><option value="PLAYER" ${selected[p.personId]==='PLAYER'?'selected':''}>Jugador</option><option value="STAFF" ${selected[p.personId]==='STAFF'?'selected':''}>Staff</option><option value="REFEREE" ${selected[p.personId]==='REFEREE'?'selected':''}>Árbitro</option><option value="OTHER" ${selected[p.personId]==='OTHER'?'selected':''}>Otro</option></select></label>`).join('');
 }
 async function renderEventEditor(eventId=''){
-  if(!calendarData){const r=await call('getCalendarData',{});calendarData=r.data;}const d=calendarData,e=(d.events||[]).find(x=>x.eventId===eventId)||{};
+  if(!calendarData){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;}const d=calendarData,e=(d.events||[]).find(x=>x.eventId===eventId)||{};
   const teams=d.teams||[],divs=d.divisions||[];
   shell(`<section class="hero compact"><span class="eyebrow">${e.eventId?'Editar':'Nueva'} actividad</span><h1>${e.eventId?escapeHtml(e.title):'Entrenamiento o partido'}</h1></section>
   <form id="event-form" class="panel form-stack"><div class="form-grid three"><label>Tipo<select id="event-type"><option value="TRAINING" ${e.eventType==='TRAINING'?'selected':''}>Entrenamiento</option><option value="MATCH" ${e.eventType==='MATCH'?'selected':''}>Partido</option>${e.eventType==='REST'?'<option value="REST" selected>Descanso</option>':''}</select></label><label>Título<input id="event-title" value="${escapeHtml(e.title||'')}" maxlength="120"></label><label>Estado<select id="event-status"><option value="SCHEDULED">Programado</option><option value="COMPLETED" ${e.status==='COMPLETED'?'selected':''}>Finalizado</option><option value="CANCELLED" ${e.status==='CANCELLED'?'selected':''}>Cancelado</option><option value="POSTPONED" ${e.status==='POSTPONED'?'selected':''}>Postergado</option></select></label><label>División<select id="event-division">${optionList(divs,'divisionId',x=>x.name,e.divisionId||'',true)}</select></label><label>Equipo<select id="event-team">${optionList(teams,'teamId',x=>x.name,e.teamId||'',true)}</select></label><label>Fecha<input id="event-date" type="date" required value="${escapeHtml(e.eventDate||isoLocalDate(new Date()))}"></label><label>Hora inicio<input id="event-start" type="time" value="${escapeHtml(e.startTime||'')}"></label><label>Hora fin<input id="event-end" type="time" value="${escapeHtml(e.endTime||'')}"></label><label>Ubicación<input id="event-location" value="${escapeHtml(e.location||'')}" maxlength="180"></label></div><div id="match-fields" class="form-grid three"><label>Rival<input id="event-opponent" value="${escapeHtml(e.opponent||'')}" maxlength="120"></label><label>Tipo partido<select id="event-match-type"><option value="FRIENDLY" ${e.matchType==='FRIENDLY'||!e.matchType?'selected':''}>Amistoso</option><option value="OTHER" ${e.matchType==='OTHER'?'selected':''}>Otro</option>${e.matchType==='COMPETITION'?'<option value="COMPETITION" selected>Competición importada</option>':''}</select></label><label>Competición<input id="event-competition" value="${escapeHtml(e.competition||'')}" maxlength="120"></label><label>Resultado club<input id="event-result-for" type="number" min="0" value="${escapeHtml(e.resultFor||'')}"></label><label>Resultado rival<input id="event-result-against" type="number" min="0" value="${escapeHtml(e.resultAgainst||'')}"></label><label>Formato de partido/jornada<select id="event-match-format"><option value="SINGLE" ${!e.matchFormat||e.matchFormat==='SINGLE'?'selected':''}>Partido único</option><option value="TRIANGULAR" ${e.matchFormat==='TRIANGULAR'?'selected':''}>Triangular</option><option value="QUADRANGULAR" ${e.matchFormat==='QUADRANGULAR'?'selected':''}>Cuadrangular</option><option value="CUSTOM" ${e.matchFormat==='CUSTOM'?'selected':''}>Personalizado</option></select></label><label>Duración partido (min)<input id="event-match-duration" type="number" min="1" max="120" value="${escapeHtml(e.matchDurationMinutes||'')}" placeholder="Usa división"></label><label>Minutos por tiempo<input id="event-half-duration" type="number" min="1" max="60" value="${escapeHtml(e.halfDurationMinutes||'')}" placeholder="Usa división"></label><div class="form-hint span-three" id="event-duration-hint">Partido único usa la duración de la división salvo que la sobrescribas. Triangular propone 36 min (18+18) y cuadrangular 24 min (12+12). Podés editar los minutos en cualquier formato.</div></div><label>Observaciones<textarea id="event-notes" maxlength="1000">${escapeHtml(e.notes||'')}</textarea></label><div class="section-divider"></div><div class="section-heading"><h2>Convocatoria / participantes</h2><p>Marcá jugadores, staff y árbitro. La asistencia se registra después.</p></div><div class="participants-grid">${eventEditorParticipants(e)}</div><div class="button-row"><button class="button secondary" type="button" id="cancel-event">Cancelar</button><button class="button primary" type="submit">Guardar actividad</button></div><div id="message" class="message"></div></form>`,'calendar');
@@ -1179,7 +1213,7 @@ function openMatchFormatDurationEditor_(e){
 }
 
 async function renderEventDetail(eventId){
-  if(!calendarData||!(calendarData.events||[]).some(x=>x.eventId===eventId)){const requestedSeasonId=(loadUiState_().statisticsFilters||{}).seasonId||(loadUiState_().calendarFilters||{}).seasonId||'';const r=await call('getCalendarData',{seasonId:requestedSeasonId});calendarData=r.data;}
+  if(!calendarData||!(calendarData.events||[]).some(x=>x.eventId===eventId)){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;}
   const d=calendarData,e=d.events.find(x=>x.eventId===eventId);if(!e)return renderCalendar();
   const persons={};d.persons.forEach(p=>persons[p.personId]=p);const parts=d.participants.filter(p=>p.eventId===eventId);
   const canEdit=d.canCreate&&['ADMIN','MANAGER','COACH'].includes(currentUser?.role);const meta=(d.leagueMeta||[]).find(m=>m.eventId===eventId);const divisionName=eventDivisionName_(e),teamName=eventTeamName_(e);
@@ -1240,7 +1274,7 @@ function renderLeagueFormatPlan_(){
 }
 
 async function renderLeagueImport(){
-  if(!calendarData){const r=await call('getCalendarData',{});calendarData=r.data;}const d=calendarData;
+  if(!calendarData){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;}const d=calendarData;
   shell(`<section class="hero compact"><span class="eyebrow">Competición</span><h1>Importar calendario de liga</h1><p>La división se detecta desde la categoría del XLSX y los equipos se filtran por esa división.</p></section><section class="panel"><form id="league-preview-form" class="form-grid two"><label>Archivo XLSX<input id="league-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label><div><button class="button primary" type="submit">Analizar archivo</button></div></form><div id="league-preview"></div><div class="button-row"><button class="button secondary" id="league-back">Volver</button></div><div id="message" class="message"></div></section>`,'calendar');
   document.getElementById('league-back').onclick=renderCalendar;
   document.getElementById('league-preview-form').onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('league-file').files?.[0];if(!f)return;const localBusy=beginUiBusy_('Leyendo calendario…');try{showMessage('Analizando calendario…');const dataUrl=await fileToDataUrl(f);endUiBusy_(localBusy);const {data}=await call('previewLeagueCalendarImport',{fileDataUrl:dataUrl,fileName:f.name});leagueImportState={previewId:data.previewId,fileName:f.name,preview:data};const rows=data.fixtures.map(x=>`<tr><td>${escapeHtml(x.roundName)}</td><td>${escapeHtml(x.eventDate)} ${escapeHtml(x.startTime||'')}</td><td>${escapeHtml(x.homeTeam)}</td><td>${escapeHtml(x.resultHome||'—')} - ${escapeHtml(x.resultAway||'—')}</td><td>${escapeHtml(x.awayTeam)}</td><td>${escapeHtml(x.refereeName||'—')}</td></tr>`).join('');

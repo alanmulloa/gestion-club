@@ -247,3 +247,14 @@ td small { margin-top: .2rem; color: var(--muted); }
 
 /* 0.6.13 · filtros persistentes y mantenimiento de actas */
 .filter-bar{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap;margin:1rem 0 .35rem;padding:.9rem;background:rgba(15,23,42,.035);border:1px solid rgba(15,23,42,.08);border-radius:14px}.filter-bar label{min-width:150px;margin:0}.filter-bar .filter-grow{flex:1 1 240px}.filter-bar input,.filter-bar select{width:100%}.filter-clear{align-self:end}.filter-count{margin:.25rem 0 .85rem;color:var(--muted,#64748b);font-size:.9rem}.bulk-actions{display:flex;gap:1rem;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:1rem 0}.maintenance-progress{margin-top:1rem}.progress-line{display:grid;gap:.5rem}.progress-line progress{width:100%;height:12px}@media(max-width:760px){.filter-bar{display:grid;grid-template-columns:1fr 1fr}.filter-bar .filter-grow{grid-column:1/-1}.filter-clear{width:100%}.bulk-actions{align-items:stretch}.bulk-actions .button{width:100%}}
+
+/* 0.6.26 · selector global de temporada en cabecera */
+.season-switcher{margin-left:auto;display:grid;grid-template-columns:auto minmax(150px,220px);align-items:center;gap:.45rem .65rem;padding:.42rem .55rem .42rem .7rem;border:1px solid rgba(255,255,255,.2);border-radius:.85rem;background:rgba(255,255,255,.08);color:#fff;font-size:.74rem;font-weight:800}
+.season-switcher>span{color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.08em}
+.season-switcher select{min-height:36px;padding:.45rem 2rem .45rem .65rem;border-color:rgba(255,255,255,.24);background:#fff;color:var(--brand-dark);font-size:.86rem;font-weight:800}
+.season-switcher.empty{grid-template-columns:auto auto}.season-switcher.empty strong{font-size:.86rem}
+@media(max-width:760px){
+  .topbar{display:grid!important;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand session" "season season";align-items:center!important;flex-direction:row!important}
+  .topbar .brand{grid-area:brand}.topbar .session{grid-area:session}.topbar .season-switcher{grid-area:season;margin:0;width:100%;grid-template-columns:auto minmax(0,1fr);padding:.32rem .45rem .32rem .6rem}
+  .season-switcher select{min-height:40px}
+}

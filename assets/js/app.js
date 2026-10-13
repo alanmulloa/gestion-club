@@ -7,6 +7,10 @@ let clubConfig = null;
 let structureData = null;
 let statisticsData = null;
 let structureSection = 'people';
+const UI_STATE_KEY = 'gestionClub.uiState.v1';
+function loadUiState_(){try{return JSON.parse(sessionStorage.getItem(UI_STATE_KEY)||'{}')||{};}catch(_){return {};}}
+function saveUiStatePatch_(patch){const next=Object.assign({},loadUiState_(),patch||{});sessionStorage.setItem(UI_STATE_KEY,JSON.stringify(next));return next;}
+function textNorm_(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
 
 
 // 0.6.12 · estabilidad visual y bloqueo de acciones concurrentes.
@@ -583,16 +587,24 @@ async function renderStructure(section = structureSection) {
 
 function renderPeopleSection() {
   const people = structureData?.persons || [];
-  const rows = people.map(person => `<tr>
+  const state=loadUiState_().peopleFilters||{};
+  const query=textNorm_(state.q||''), status=state.status||'', divisionId=state.divisionId||'';
+  const playerRoleIds=new Set((structureData.roles||[]).filter(r=>r.category==='PLAYER').map(r=>r.roleId));
+  const personDivs={};(structureData.assignments||[]).forEach(a=>{if(a.status==='ACTIVE'&&a.divisionId&&playerRoleIds.has(a.roleId))(personDivs[a.personId]||(personDivs[a.personId]=new Set())).add(a.divisionId);});
+  const filtered=people.filter(p=>(!query||textNorm_([p.displayName,p.email,p.phone].join(' ')).includes(query))&&(!status||p.status===status)&&(!divisionId||(personDivs[p.personId]&&personDivs[p.personId].has(divisionId))));
+  const rows = filtered.map(person => `<tr>
     <td><strong>${escapeHtml(person.displayName)}</strong><small>${escapeHtml(person.email || 'Sin correo')}</small></td>
     <td>${escapeHtml(person.phone || '—')}</td>
     <td>${escapeHtml(person.birthDate || '—')}</td>
     <td>${statusBadge(person.status)}</td>
     <td><button class="button mini secondary" data-edit-person="${escapeHtml(person.personId)}">Editar</button></td>
   </tr>`).join('');
+  const divisions=(structureData?.divisions||[]).filter(x=>x.status==='ACTIVE');
   return `<section class="panel management-panel">
     <div class="panel-heading"><div><h2>Personas</h2><p>Registro único para jugadores, entrenadores, managers y colaboradores.</p></div><button class="button primary" id="new-person">Nueva persona</button></div>
-    ${people.length ? `<div class="table-wrap"><table><thead><tr><th>Persona</th><th>Teléfono</th><th>Nacimiento</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('Todavía no hay personas cargadas.')}
+    <div class="filter-bar"><label class="filter-grow">Buscar<input id="people-filter-q" placeholder="Nombre, correo o teléfono" value="${escapeHtml(state.q||'')}"></label><label>División<select id="people-filter-division"><option value="">Todas</option>${divisions.map(d=>`<option value="${escapeHtml(d.divisionId)}" ${d.divisionId===divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="people-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option></select></label><button class="button secondary filter-clear" id="people-filter-clear">Limpiar</button></div>
+    <p class="filter-count">${filtered.length} de ${people.length} personas</p>
+    ${filtered.length ? `<div class="table-wrap"><table><thead><tr><th>Persona</th><th>Teléfono</th><th>Nacimiento</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyTable('No hay personas que coincidan con los filtros.')}
     <div id="editor-host"></div>
   </section>`;
 }
@@ -643,6 +655,14 @@ function wireStructureSection() {
   bind('[data-edit-division]', data => showDivisionEditor((structureData.divisions || []).find(x => x.divisionId === data.editDivision)));
   bind('[data-edit-team]', data => showTeamEditor((structureData.teams || []).find(x => x.teamId === data.editTeam)));
   bind('[data-edit-assignment]', data => showAssignmentEditor((structureData.assignments || []).find(x => x.assignmentId === data.editAssignment)));
+  if(structureSection==='people'){
+    const apply=()=>{saveUiStatePatch_({peopleFilters:{q:val('people-filter-q'),divisionId:val('people-filter-division'),status:val('people-filter-status')}});renderStructure('people');};
+    document.getElementById('people-filter-q')?.addEventListener('change',apply);
+    document.getElementById('people-filter-q')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();apply();}});
+    document.getElementById('people-filter-division')?.addEventListener('change',apply);
+    document.getElementById('people-filter-status')?.addEventListener('change',apply);
+    document.getElementById('people-filter-clear')?.addEventListener('click',()=>{saveUiStatePatch_({peopleFilters:{}});renderStructure('people');});
+  }
 }
 
 function editorShell(title, description, fields, submitLabel = 'Guardar') {
@@ -988,9 +1008,11 @@ async function renderUsers(){
   if(!['ADMIN','MANAGER'].includes(currentUser?.role)) return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>No tienes permisos para administrar usuarios.</p></section>','users');
   try{
     const {data}=await call('getUsersData'); const people=data.persons||[], users=data.users||[], roles=data.securityRoles||[];
-    const rows=users.map(u=>`<tr><td><strong>${escapeHtml(u.email)}</strong><small>${escapeHtml(personNameById(people,u.personId))}</small></td><td>${escapeHtml(u.securityRole)}</td><td>${statusBadge(u.status)}</td><td>${escapeHtml(u.lastLoginAt||'Nunca')}</td><td><button class="button mini secondary" data-reset-user="${u.userId}">Reset</button><button class="button mini secondary" data-toggle-user="${u.userId}" data-status="${u.status}" data-role="${u.securityRole}">${u.status==='ACTIVE'?'Desactivar':'Activar'}</button></td></tr>`).join('');
+    const st=loadUiState_().userFilters||{}, q=textNorm_(st.q||''), status=st.status||'', role=st.role||'';
+    const filtered=users.filter(u=>(!q||textNorm_([u.email,personNameById(people,u.personId)].join(' ')).includes(q))&&(!status||u.status===status)&&(!role||u.securityRole===role));
+    const rows=filtered.map(u=>`<tr><td><strong>${escapeHtml(u.email)}</strong><small>${escapeHtml(personNameById(people,u.personId))}</small></td><td>${escapeHtml(u.securityRole)}</td><td>${statusBadge(u.status)}</td><td>${escapeHtml(u.lastLoginAt||'Nunca')}</td><td><button class="button mini secondary" data-reset-user="${u.userId}">Reset</button><button class="button mini secondary" data-toggle-user="${u.userId}" data-status="${u.status}" data-role="${u.securityRole}">${u.status==='ACTIVE'?'Desactivar':'Activar'}</button></td></tr>`).join('');
     shell(`<section class="hero compact"><span class="eyebrow">Accesos</span><h1>Usuarios y permisos</h1><p>La cuenta de acceso se mantiene separada de la ficha de persona.</p></section>
-    <section class="panel"><div class="panel-heading"><div><h2>Cuentas</h2></div></div>${users.length?`<div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay usuarios disponibles.')}
+    <section class="panel"><div class="panel-heading"><div><h2>Cuentas</h2></div></div><div class="filter-bar"><label class="filter-grow">Buscar<input id="user-filter-q" placeholder="Nombre o correo" value="${escapeHtml(st.q||'')}"></label><label>Rol<select id="user-filter-role"><option value="">Todos</option>${roles.map(r=>`<option value="${r}" ${role===r?'selected':''}>${r}</option>`).join('')}</select></label><label>Estado<select id="user-filter-status"><option value="">Todos</option><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="DISABLED" ${status==='DISABLED'?'selected':''}>Desactivados</option><option value="LOCKED" ${status==='LOCKED'?'selected':''}>Bloqueados</option></select></label><button class="button secondary filter-clear" id="user-filter-clear">Limpiar</button></div><p class="filter-count">${filtered.length} de ${users.length} usuarios</p>${filtered.length?`<div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay usuarios que coincidan con los filtros.')}
     <form id="user-form" class="form-grid two" style="margin-top:1rem">
       <label>Persona<select id="user-person" required>${optionList(people,'personId',p=>p.displayName,'',false)}</select></label>
       <label>Correo<input id="user-email" type="email" required></label>
@@ -998,6 +1020,8 @@ async function renderUsers(){
       <label>Contraseña temporal<input id="user-password" type="password" minlength="10" required></label>
       <div><button class="button primary" type="submit">Crear usuario</button></div>
     </form><div id="message" class="message"></div></section>`,'users');
+    const applyFilters=()=>{saveUiStatePatch_({userFilters:{q:val('user-filter-q'),role:val('user-filter-role'),status:val('user-filter-status')}});renderUsers();};
+    document.getElementById('user-filter-q').onchange=applyFilters;document.getElementById('user-filter-q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();applyFilters();}};document.getElementById('user-filter-role').onchange=applyFilters;document.getElementById('user-filter-status').onchange=applyFilters;document.getElementById('user-filter-clear').onclick=()=>{saveUiStatePatch_({userFilters:{}});renderUsers();};
     document.getElementById('user-person').onchange=()=>{const p=people.find(x=>x.personId===val('user-person'));if(p&&p.email)document.getElementById('user-email').value=p.email;};
     document.getElementById('user-form').onsubmit=async e=>{e.preventDefault();try{await call('createUser',{personId:val('user-person'),email:val('user-email'),securityRole:val('user-role'),temporaryPassword:val('user-password')});await renderUsers();}catch(err){showMessage(err.message,'error');}};
     document.querySelectorAll('[data-reset-user]').forEach(b=>b.onclick=async()=>{const pwd=prompt('Nueva contraseña temporal (mínimo 10 caracteres):');if(!pwd)return;try{await call('resetUserPassword',{userId:b.dataset.resetUser,temporaryPassword:pwd});showMessage('Contraseña restablecida.','success');}catch(err){showMessage(err.message,'error');}});
@@ -1081,24 +1105,36 @@ async function renderStatistics(filters={}){
 }
 
 async function renderCalendar(){
-  try{const {data}=await call('getCalendarData',{});calendarData=data;}
-  catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar el calendario</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
-  const d=calendarData, divisionMap={},teamMap={};d.divisions.forEach(x=>divisionMap[x.divisionId]=x.name);d.teams.forEach(x=>teamMap[x.teamId]=x.name);
-  if(isMobileViewport()&&!calendarViewTouched) calendarView='agenda';
+  try{const {data}=await call('getCalendarData',{});calendarData=data;}catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
+  const d=calendarData, state=loadUiState_().calendarFilters||{};
+  if(!calendarViewTouched&&loadUiState_().calendarView)calendarView=loadUiState_().calendarView;
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
-  const renderCurrentCalendar=(events)=>calendarView==='month'?renderMonthGrid(events):calendarView==='week'?renderWeekGrid(events):renderAgenda(events);
+  const reportSet=new Set(d.matchReportEventIds||[]);
   shell(`<section class="hero compact"><span class="eyebrow">Actividad deportiva</span><h1>Calendario</h1><p>Entrenamientos y partidos en una única vista.</p></section>
-  <section class="panel"><div class="calendar-toolbar"><div class="button-row"><button class="button secondary" id="cal-prev">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row"><button class="button ${calendarView==='agenda'?'primary':'secondary'}" id="cal-agenda">Agenda</button><button class="button ${calendarView==='month'?'primary':'secondary'}" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'}" id="cal-week">Semana</button>${d.canImportLeague?'<button class="button secondary" id="import-league">Importar liga</button>':''}${d.canCreate?'<button class="button primary" id="new-event">Nueva actividad</button>':''}</div></div><div class="form-grid three calendar-filters"><label>División<select id="cal-filter-division">${optionList(d.divisions,'divisionId',x=>x.name,'',true)}</select></label><label id="cal-filter-team-wrap" hidden>Equipo<select id="cal-filter-team"><option value="">Todos los equipos</option></select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING">Entrenamientos</option><option value="MATCH">Partidos</option><option value="REST">Descansos</option></select></label></div><div id="calendar-host">${renderCurrentCalendar(d.events)}</div><div id="message" class="message"></div></section>`,'calendar');
+  <section class="panel"><div class="calendar-toolbar"><div class="button-row"><button class="button secondary" id="cal-prev">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row"><button class="button ${calendarView==='agenda'?'primary':'secondary'}" id="cal-agenda">Agenda</button><button class="button ${calendarView==='month'?'primary':'secondary'}" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'}" id="cal-week">Semana</button>${d.canImportLeague?'<button class="button secondary" id="import-league">Importar liga</button>':''}${['ADMIN','MANAGER'].includes(currentUser?.role)?'<button class="button secondary" id="maintain-reports">Actualizar actas</button>':''}${d.canCreate?'<button class="button primary" id="new-event">Nueva actividad</button>':''}</div></div>
+  <div class="filter-bar calendar-filters"><label>División<select id="cal-filter-division">${optionList(d.divisions,'divisionId',x=>x.name,state.divisionId||'',true)}</select></label><label id="cal-filter-team-wrap">Equipo<select id="cal-filter-team"><option value="">Todos los equipos</option></select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING" ${state.type==='TRAINING'?'selected':''}>Entrenamientos</option><option value="MATCH" ${state.type==='MATCH'?'selected':''}>Partidos</option><option value="REST" ${state.type==='REST'?'selected':''}>Descansos</option></select></label><label>Estado<select id="cal-filter-status"><option value="">Todos</option>${['SCHEDULED','COMPLETED','POSTPONED','CANCELLED'].map(x=>`<option value="${x}" ${state.status===x?'selected':''}>${escapeHtml(eventStatusLabel(x))}</option>`).join('')}</select></label><label>Acta<select id="cal-filter-report"><option value="">Todas</option><option value="WITH" ${state.report==='WITH'?'selected':''}>Con acta</option><option value="WITHOUT" ${state.report==='WITHOUT'?'selected':''}>Sin acta</option></select></label><label class="filter-grow">Rival / título<input id="cal-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Buscar partido o rival"></label><button class="button secondary filter-clear" id="cal-filter-clear">Limpiar</button></div>
+  <div id="calendar-host"></div><div id="message" class="message"></div></section>`,'calendar');
   const move=n=>{calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+(calendarView==='month'?n:0),calendarCursor.getDate()+((calendarView==='week'||calendarView==='agenda')?7*n:0));renderCalendar();};
   document.getElementById('cal-prev').onclick=()=>move(-1);document.getElementById('cal-next').onclick=()=>move(1);document.getElementById('cal-today').onclick=()=>{calendarCursor=new Date();renderCalendar();};
-  document.getElementById('cal-agenda').onclick=()=>{calendarViewTouched=true;calendarView='agenda';renderCalendar();};document.getElementById('cal-month').onclick=()=>{calendarViewTouched=true;calendarView='month';renderCalendar();};document.getElementById('cal-week').onclick=()=>{calendarViewTouched=true;calendarView='week';renderCalendar();};
-  const ib=document.getElementById('import-league');if(ib)ib.onclick=renderLeagueImport;const nb=document.getElementById('new-event');if(nb)nb.onclick=()=>renderEventEditor();
+  document.getElementById('cal-agenda').onclick=()=>{calendarViewTouched=true;calendarView='agenda';saveUiStatePatch_({calendarView});renderCalendar();};document.getElementById('cal-month').onclick=()=>{calendarViewTouched=true;calendarView='month';saveUiStatePatch_({calendarView});renderCalendar();};document.getElementById('cal-week').onclick=()=>{calendarViewTouched=true;calendarView='week';saveUiStatePatch_({calendarView});renderCalendar();};
+  const ib=document.getElementById('import-league');if(ib)ib.onclick=renderLeagueImport;const nb=document.getElementById('new-event');if(nb)nb.onclick=()=>renderEventEditor();const mb=document.getElementById('maintain-reports');if(mb)mb.onclick=renderReportMaintenance_;
   const teamWrap=document.getElementById('cal-filter-team-wrap'),teamSelect=document.getElementById('cal-filter-team');
-  const syncCalendarTeams=()=>{const div=val('cal-filter-division');const teams=div?(d.teams||[]).filter(t=>t.divisionId===div):[];teamWrap.hidden=!div;teamSelect.innerHTML='<option value="">Todos los equipos</option>'+teams.map(t=>`<option value="${escapeHtml(t.teamId)}">${escapeHtml(t.name)}</option>`).join('');if(!div)teamSelect.value='';};
-  const applyFilters=()=>{const div=val('cal-filter-division'),team=val('cal-filter-team'),type=val('cal-filter-type');const filtered=d.events.filter(e=>(!div||e.divisionId===div)&&(!team||e.teamId===team||(e.eventType==='TRAINING'&&e.divisionId===div&&!e.teamId))&&(!type||e.eventType===type));document.getElementById('calendar-host').innerHTML=renderCurrentCalendar(filtered);document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));};
-  document.getElementById('cal-filter-division').onchange=()=>{syncCalendarTeams();applyFilters();};teamSelect.onchange=applyFilters;document.getElementById('cal-filter-type').onchange=applyFilters;syncCalendarTeams();
-  document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));
+  const syncCalendarTeams=()=>{const div=val('cal-filter-division');const teams=div?(d.teams||[]).filter(t=>t.divisionId===div):[];teamWrap.hidden=!div;teamSelect.innerHTML='<option value="">Todos los equipos</option>'+teams.map(t=>`<option value="${escapeHtml(t.teamId)}" ${state.teamId===t.teamId?'selected':''}>${escapeHtml(t.name)}</option>`).join('');if(!div)teamSelect.value='';};
+  const applyFilters=()=>{const f={divisionId:val('cal-filter-division'),teamId:val('cal-filter-team'),type:val('cal-filter-type'),status:val('cal-filter-status'),report:val('cal-filter-report'),q:val('cal-filter-q')};saveUiStatePatch_({calendarFilters:f});const q=textNorm_(f.q);const filtered=d.events.filter(e=>(!f.divisionId||e.divisionId===f.divisionId)&&(!f.teamId||e.teamId===f.teamId||(e.eventType==='TRAINING'&&e.divisionId===f.divisionId&&!e.teamId))&&(!f.type||e.eventType===f.type)&&(!f.status||e.status===f.status)&&(!f.report||(f.report==='WITH'?reportSet.has(e.eventId):!reportSet.has(e.eventId)))&&(!q||textNorm_([e.title,e.opponent,e.competition,e.location].join(' ')).includes(q)));document.getElementById('calendar-host').innerHTML=renderCurrentCalendar(filtered);document.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openEvent));};
+  syncCalendarTeams();applyFilters();
+  document.getElementById('cal-filter-division').onchange=()=>{const st=loadUiState_().calendarFilters||{};state.teamId='';syncCalendarTeams();applyFilters();};teamSelect.onchange=applyFilters;document.getElementById('cal-filter-type').onchange=applyFilters;document.getElementById('cal-filter-status').onchange=applyFilters;document.getElementById('cal-filter-report').onchange=applyFilters;document.getElementById('cal-filter-q').onchange=applyFilters;document.getElementById('cal-filter-q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();applyFilters();}};document.getElementById('cal-filter-clear').onclick=()=>{saveUiStatePatch_({calendarFilters:{}});renderCalendar();};
 }
+
+async function renderReportMaintenance_(){
+  try{
+    const {data}=await call('getMatchReportMaintenanceData');const reports=data.reports||[];
+    shell(`<section class="hero compact"><span class="eyebrow">Mantenimiento</span><h1>Actualizar actas existentes</h1><p>Relee PDFs ya asociados y vuelve a sincronizar los datos oficiales, incluido orderNo. plannedOrderNo se conserva.</p></section><section class="panel"><div class="panel-heading"><div><h2>Actas disponibles</h2><p>Selecciona las que quieras actualizar. Si una revisión automática no es segura, se omite y queda para revisión manual.</p></div><button class="button secondary" id="back-calendar-maint">Volver</button></div>${reports.length?`<div class="bulk-actions"><label><input type="checkbox" id="report-select-all" checked> Seleccionar todas (${reports.length})</label><button class="button primary" id="report-run-selected">Reprocesar seleccionadas</button></div><div class="table-wrap"><table><thead><tr><th></th><th>Fecha</th><th>División / Equipo</th><th>Partido</th><th>Estado</th><th>Parser</th></tr></thead><tbody>${reports.map(r=>`<tr><td><input type="checkbox" data-maint-report="${escapeHtml(r.reportId)}" checked></td><td>${escapeHtml(r.eventDate||'—')}</td><td>${escapeHtml([r.divisionName,r.teamName].filter(Boolean).join(' · ')||'—')}</td><td><strong>${escapeHtml(r.title||'Partido')}</strong><small>${escapeHtml(r.opponent?('vs '+r.opponent):'')}</small></td><td>${escapeHtml(r.status||'—')}</td><td>${escapeHtml(r.parserVersion||'—')}</td></tr>`).join('')}</tbody></table></div>`:emptyTable('No hay partidos con PDF de acta asociado.')}<div id="report-maint-progress" class="maintenance-progress"></div><div id="message" class="message"></div></section>`,'calendar');
+    document.getElementById('back-calendar-maint').onclick=renderCalendar;
+    const all=document.getElementById('report-select-all');if(all)all.onchange=()=>document.querySelectorAll('[data-maint-report]').forEach(x=>x.checked=all.checked);
+    const run=document.getElementById('report-run-selected');if(run)run.onclick=async()=>{const ids=[...document.querySelectorAll('[data-maint-report]:checked')].map(x=>x.dataset.maintReport);if(!ids.length)return showMessage('Selecciona al menos un acta.','error');if(!confirm(`Se reprocesarán ${ids.length} actas y se sincronizarán sus datos oficiales. ¿Continuar?`))return;run.disabled=true;let ok=0,review=0,failed=0;const host=document.getElementById('report-maint-progress');for(let i=0;i<ids.length;i++){host.innerHTML=`<div class="progress-line"><strong>Procesando ${i+1} de ${ids.length}</strong><progress max="${ids.length}" value="${i}"></progress></div>`;try{const res=(await call('refreshMatchReportOfficialData',{reportId:ids[i]})).data;if(res.ok)ok++;else if(res.needsReview)review++;else failed++;}catch(_){failed++;}}host.innerHTML=`<div class="message ${failed?'warning':'success'}"><strong>Proceso terminado.</strong> ${ok} actualizadas · ${review} requieren revisión · ${failed} con error.</div>`;showToast_('Actualización de actas finalizada.',failed?'warning':'success');run.disabled=false;};
+  }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar las actas</h1><p>${escapeHtml(err.message)}</p><button class="button secondary" id="back-calendar-maint">Volver</button></section>`,'calendar');document.getElementById('back-calendar-maint')?.addEventListener('click',renderCalendar);}
+}
+
 
 function eventEditorParticipants(e){
   const d=calendarData, selected={}; (d.participants||[]).filter(p=>e&&p.eventId===e.eventId).forEach(p=>selected[p.personId]=p.participantType);

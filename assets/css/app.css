@@ -243,3 +243,7 @@ td small { margin-top: .2rem; color: var(--muted); }
 .ui-toast{padding:.82rem 1rem;border-radius:12px;background:var(--brand-dark);color:#fff;box-shadow:0 14px 38px rgba(0,0,0,.2);opacity:0;transform:translateY(8px);transition:opacity .18s ease,transform .18s ease;font-weight:750;}
 .ui-toast.show{opacity:1;transform:none}.ui-toast.error{background:var(--danger)}.ui-toast.warning{background:#7a4b08}.ui-toast.success{background:var(--success)}
 @media(max-width:620px){.ui-busy-card{width:100%}.ui-toast-host{left:1rem;right:1rem;width:auto;bottom:calc(1rem + env(safe-area-inset-bottom));}}
+
+
+/* 0.6.13 · filtros persistentes y mantenimiento de actas */
+.filter-bar{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap;margin:1rem 0 .35rem;padding:.9rem;background:rgba(15,23,42,.035);border:1px solid rgba(15,23,42,.08);border-radius:14px}.filter-bar label{min-width:150px;margin:0}.filter-bar .filter-grow{flex:1 1 240px}.filter-bar input,.filter-bar select{width:100%}.filter-clear{align-self:end}.filter-count{margin:.25rem 0 .85rem;color:var(--muted,#64748b);font-size:.9rem}.bulk-actions{display:flex;gap:1rem;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:1rem 0}.maintenance-progress{margin-top:1rem}.progress-line{display:grid;gap:.5rem}.progress-line progress{width:100%;height:12px}@media(max-width:760px){.filter-bar{display:grid;grid-template-columns:1fr 1fr}.filter-bar .filter-grow{grid-column:1/-1}.filter-clear{width:100%}.bulk-actions{align-items:stretch}.bulk-actions .button{width:100%}}

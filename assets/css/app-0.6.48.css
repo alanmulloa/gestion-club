@@ -373,3 +373,5 @@ td small { margin-top: .2rem; color: var(--muted); }
 .availability-period-card p{margin:0;color:var(--muted)}
 .availability-period-card small{display:block;margin-top:.35rem;color:var(--muted)}
 @media(max-width:760px){.availability-blocked-row td{min-width:140px}.availability-period-card{padding:.85rem}}
+
+/* 0.6.48 · disponibilidad automática, snapshot previo y asistencia simplificada */

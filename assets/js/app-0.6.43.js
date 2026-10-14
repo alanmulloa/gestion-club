@@ -1,9 +1,9 @@
-const FRONTEND_BUILD = '0.6.42';
+const FRONTEND_BUILD = '0.6.43';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.42';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.43';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -52,10 +52,10 @@ function renderStartupShell_(){
   root.innerHTML=`<main class="container"><section class="panel narrow startup-panel"><span class="eyebrow">Gestión Club</span><h1>Preparando tu sesión</h1><p>Cargando configuración y temporada…</p><div class="inline-loader" aria-label="Cargando"></div></section></main>`;
 }
 
-// 0.6.12 · estabilidad visual y bloqueo de acciones concurrentes.
-// Cada llamada al backend bloquea temporalmente la interfaz para evitar dobles clics,
-// navegaciones concurrentes y pantallas antiguas que reaparecen mientras otra petición
-// todavía está en curso. El popup se muestra con una pequeña demora para no parpadear.
+// 0.6.43 · feedback de carga en dos niveles.
+// Las lecturas muestran un popup compacto sin bloquear la navegación; las operaciones
+// que modifican datos mantienen el overlay bloqueante para evitar acciones concurrentes.
+// El popup aparece con una pequeña demora para no parpadear en respuestas rápidas.
 let uiBusySeq = 0;
 const uiBusyTasks = new Map();
 let uiBusyTimer = null;
@@ -98,31 +98,34 @@ function ensureBusyOverlay_() {
 
 function refreshBusyOverlay_() {
   const overlay = ensureBusyOverlay_();
-  const latest = Array.from(uiBusyTasks.values()).pop();
+  const tasks = Array.from(uiBusyTasks.values());
+  const latest = tasks.length ? tasks[tasks.length - 1] : null;
+  const blocking = tasks.some(task => !!task.blocking);
   const title = overlay.querySelector('[data-ui-busy-title]');
-  if (title) title.textContent = latest || 'Procesando…';
+  if (title) title.textContent = latest?.message || 'Procesando…';
   if (uiBusyTasks.size) {
-    overlay.classList.add('is-blocking');
+    overlay.classList.toggle('is-blocking', blocking);
+    overlay.classList.toggle('is-passive', !blocking);
     document.documentElement.setAttribute('aria-busy', 'true');
-    if ('inert' in root) root.inert = true;
+    if ('inert' in root) root.inert = blocking;
     if (!overlay.classList.contains('is-visible') && !uiBusyTimer) {
       uiBusyTimer = setTimeout(() => {
         uiBusyTimer = null;
         if (uiBusyTasks.size) overlay.classList.add('is-visible');
-      }, 160);
+      }, 180);
     }
   } else {
     if (uiBusyTimer) clearTimeout(uiBusyTimer);
     uiBusyTimer = null;
-    overlay.classList.remove('is-visible', 'is-blocking');
+    overlay.classList.remove('is-visible', 'is-blocking', 'is-passive');
     document.documentElement.removeAttribute('aria-busy');
     if ('inert' in root) root.inert = false;
   }
 }
 
-function beginUiBusy_(message) {
+function beginUiBusy_(message, blocking = true) {
   const token = ++uiBusySeq;
-  uiBusyTasks.set(token, message || 'Procesando…');
+  uiBusyTasks.set(token, {message: message || 'Procesando…', blocking: !!blocking});
   refreshBusyOverlay_();
   return token;
 }
@@ -215,7 +218,8 @@ function shouldBlockUiForAction_(action){
 }
 
 async function call(action, payload = {}, fixedRequestId = null) {
-  const busyToken = shouldBlockUiForAction_(action) ? beginUiBusy_(busyMessageForAction_(action)) : 0;
+  const blocking = shouldBlockUiForAction_(action);
+  const busyToken = beginUiBusy_(busyMessageForAction_(action), blocking);
   try {
     const response = await serverApi({
       action,

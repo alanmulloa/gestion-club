@@ -1,9 +1,9 @@
-const FRONTEND_BUILD = '0.6.43';
+const FRONTEND_BUILD = '0.6.44';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.43';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.44';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -52,7 +52,7 @@ function renderStartupShell_(){
   root.innerHTML=`<main class="container"><section class="panel narrow startup-panel"><span class="eyebrow">Gestión Club</span><h1>Preparando tu sesión</h1><p>Cargando configuración y temporada…</p><div class="inline-loader" aria-label="Cargando"></div></section></main>`;
 }
 
-// 0.6.43 · feedback de carga en dos niveles.
+// 0.6.44 - feedback de carga en dos niveles.
 // Las lecturas muestran un popup compacto sin bloquear la navegación; las operaciones
 // que modifican datos mantienen el overlay bloqueante para evitar acciones concurrentes.
 // El popup aparece con una pequeña demora para no parpadear en respuestas rápidas.

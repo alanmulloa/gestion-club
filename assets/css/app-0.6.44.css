@@ -308,3 +308,32 @@ td small { margin-top: .2rem; color: var(--muted); }
 /* 0.6.43 · carga visible sin bloquear: lecturas muestran popup compacto; escrituras mantienen overlay bloqueante. */
 .startup-panel{margin-top:3rem;text-align:left;}
 .inline-loader{width:32px;height:32px;margin-top:1rem;border-radius:50%;border:3px solid color-mix(in srgb,var(--brand) 18%,white);border-top-color:var(--brand);animation:ui-spin .75s linear infinite;}
+
+/* 0.6.44 - las lecturas usan una linea de progreso discreta; no muestran popup flotante. */
+.ui-busy-overlay.is-visible.is-passive{
+  display:block;
+  padding:0;
+  place-items:unset;
+  background:transparent;
+  backdrop-filter:none;
+  pointer-events:none;
+}
+.ui-busy-overlay.is-visible.is-passive .ui-busy-card{display:none;}
+.ui-busy-overlay.is-visible.is-passive::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:-32%;
+  width:32%;
+  height:3px;
+  border-radius:0 999px 999px 0;
+  background:linear-gradient(90deg,transparent,var(--brand),var(--accent,var(--brand)));
+  animation:ui-passive-progress 1.05s ease-in-out infinite;
+}
+@keyframes ui-passive-progress{
+  from{left:-32%;}
+  to{left:100%;}
+}
+@media (prefers-reduced-motion:reduce){
+  .ui-busy-overlay.is-visible.is-passive::before{animation-duration:2.2s;}
+}

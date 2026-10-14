@@ -384,3 +384,7 @@ td small { margin-top: .2rem; color: var(--muted); }
 .lineup-row span small{display:block;margin-top:.08rem;color:var(--muted);font-size:.72rem;font-weight:700}
 .match-staff-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.8rem;margin-top:1rem}.match-staff-summary>div{padding:.85rem;border:1px solid var(--line);border-radius:.85rem;background:#fafbf8}.match-staff-summary h3{margin:0 0 .4rem}
 @media(max-width:760px){.staff-group{padding:.7rem}.match-staff-summary{grid-template-columns:1fr}}
+
+/* 0.6.50 · acciones de baja, staff unificado y reutilización explícita del equipo anterior */
+.inline-actions{display:flex;gap:.35rem;flex-wrap:wrap;justify-content:flex-end}.compact-actions{margin:.35rem 0 .85rem}.linked-staff-stack li{display:flex;align-items:baseline;justify-content:space-between;gap:.65rem}.linked-staff-stack li small{color:var(--muted);font-weight:700}.availability-group table td:last-child{min-width:170px}
+@media(max-width:760px){.inline-actions{justify-content:flex-start}.availability-group table td:last-child{min-width:150px}.linked-staff-stack li{align-items:flex-start;flex-direction:column;gap:.08rem}}

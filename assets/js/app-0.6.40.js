@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.39';
+const FRONTEND_BUILD = '0.6.40';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';

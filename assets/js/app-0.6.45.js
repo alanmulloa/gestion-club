@@ -1,9 +1,9 @@
-const FRONTEND_BUILD = '0.6.44';
+const FRONTEND_BUILD = '0.6.45';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.44';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.45';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -16,6 +16,15 @@ const UI_STATE_KEY = 'gestionClub.uiState.v1';
 function loadUiState_(){try{return JSON.parse(sessionStorage.getItem(UI_STATE_KEY)||'{}')||{};}catch(_){return {};}}
 function saveUiStatePatch_(patch){const next=Object.assign({},loadUiState_(),patch||{});sessionStorage.setItem(UI_STATE_KEY,JSON.stringify(next));return next;}
 function textNorm_(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
+const APP_TIMEZONE = config.timezone || 'Europe/Madrid';
+function formatAppDateTime_(value){
+  if(!value)return '';
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return String(value||'').replace('T',' ').slice(0,16);
+  try{
+    return new Intl.DateTimeFormat('es-ES',{timeZone:APP_TIMEZONE,day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(d).replace(',', '');
+  }catch(_){return String(value||'').replace('T',' ').slice(0,16);}
+}
 
 
 
@@ -52,10 +61,10 @@ function renderStartupShell_(){
   root.innerHTML=`<main class="container"><section class="panel narrow startup-panel"><span class="eyebrow">Gestión Club</span><h1>Preparando tu sesión</h1><p>Cargando configuración y temporada…</p><div class="inline-loader" aria-label="Cargando"></div></section></main>`;
 }
 
-// 0.6.44 - feedback de carga en dos niveles.
-// Las lecturas muestran un popup compacto sin bloquear la navegación; las operaciones
-// que modifican datos mantienen el overlay bloqueante para evitar acciones concurrentes.
-// El popup aparece con una pequeña demora para no parpadear en respuestas rápidas.
+// 0.6.45 - feedback de carga visible y centrado.
+// Las lecturas muestran un indicador compacto centrado sin bloquear la navegación;
+// las operaciones que modifican datos usan el mismo componente con backdrop bloqueante.
+// Aparece con una pequeña demora para evitar parpadeos en respuestas rápidas.
 let uiBusySeq = 0;
 const uiBusyTasks = new Map();
 let uiBusyTimer = null;
@@ -91,7 +100,7 @@ function ensureBusyOverlay_() {
   overlay.setAttribute('role', 'status');
   overlay.setAttribute('aria-live', 'polite');
   overlay.setAttribute('aria-label', 'Operación en curso');
-  overlay.innerHTML = `<div class="ui-busy-card"><span class="ui-spinner" aria-hidden="true"></span><div><strong data-ui-busy-title>Procesando…</strong><small>No cierres esta pantalla.</small></div></div>`;
+  overlay.innerHTML = `<div class="ui-busy-card"><span class="ui-spinner" aria-hidden="true"></span><div><strong data-ui-busy-title>Procesando…</strong><small data-ui-busy-subtitle>Esperá un momento.</small></div></div>`;
   document.body.appendChild(overlay);
   return overlay;
 }
@@ -102,7 +111,9 @@ function refreshBusyOverlay_() {
   const latest = tasks.length ? tasks[tasks.length - 1] : null;
   const blocking = tasks.some(task => !!task.blocking);
   const title = overlay.querySelector('[data-ui-busy-title]');
+  const subtitle = overlay.querySelector('[data-ui-busy-subtitle]');
   if (title) title.textContent = latest?.message || 'Procesando…';
+  if (subtitle) subtitle.textContent = blocking ? 'Esperá un momento.' : 'Estamos preparando la pantalla.';
   if (uiBusyTasks.size) {
     overlay.classList.toggle('is-blocking', blocking);
     overlay.classList.toggle('is-passive', !blocking);
@@ -112,7 +123,7 @@ function refreshBusyOverlay_() {
       uiBusyTimer = setTimeout(() => {
         uiBusyTimer = null;
         if (uiBusyTasks.size) overlay.classList.add('is-visible');
-      }, 180);
+      }, 240);
     }
   } else {
     if (uiBusyTimer) clearTimeout(uiBusyTimer);
@@ -1493,7 +1504,7 @@ async function renderCompetitions(){
       const links=competitionLinkButtons_(c)||'<span class="muted-text">Sin enlaces</span>';
       const webSync=String(c.calendarUrl||'').includes('farugby.matchready.es');
       const syncState=c.lastSyncStatus==='OK'?`<span class="status-pill success">Sincronizada</span>`:c.lastSyncStatus==='ERROR'?`<span class="status-pill warning">Error sync</span>`:'<span class="status-pill muted">Sin sincronizar</span>';
-      const syncText=c.lastSyncAt?`<small>${escapeHtml(c.lastSyncAt.replace('T',' ').slice(0,16))}${c.lastSyncSummary?' · '+escapeHtml(c.lastSyncSummary):''}</small>`:'<small>El alta puede traer el calendario automáticamente.</small>';
+      const syncText=c.lastSyncAt?`<small>${escapeHtml(formatAppDateTime_(c.lastSyncAt))}${c.lastSyncSummary?' · '+escapeHtml(c.lastSyncSummary):''}</small>`:'<small>El alta puede traer el calendario automáticamente.</small>';
       return `<tr><td><strong>${escapeHtml((divMap[c.divisionId]||{}).name||'—')}</strong><small>${escapeHtml((teamMap[c.teamId]||{}).name||'Toda la división')}</small></td><td><strong>${escapeHtml(c.name||'—')}</strong>${c.phase?`<small>${escapeHtml(c.phase)}</small>`:''}${c.externalClubName?`<small>Club FAR: ${escapeHtml(c.externalClubName)}</small>`:''}</td><td>${escapeHtml(competitionTypeLabelClient_(c.competitionType))}<small>${escapeHtml(c.federationName||'')}</small></td><td><div class="button-row compact-links">${links}</div></td><td>${syncState}${syncText}</td><td><div class="button-row"><button class="button mini secondary" data-edit-competition="${escapeHtml(c.competitionId)}">Editar</button>${webSync?`<button class="button mini primary" data-sync-competition="${escapeHtml(c.competitionId)}">Actualizar desde FAR</button>`:''}</div></td></tr>`;
     }).join('');
     shell(`<section class="hero compact"><span class="eyebrow">Calendario federativo</span><h1>Actualizar desde WEB</h1><p>Gestioná las competiciones y sincronizá FAR / MatchReady. Podés actualizar una competición o todas las activas de la temporada.</p></section><section class="panel"><div class="panel-heading"><div><h2>${escapeHtml(selectedSeason_()?.name||'Temporada')}</h2><p>${(data.competitions||[]).length} competición(es) configurada(s).</p></div><div class="button-row"><button class="button secondary" id="competitions-back">Volver al calendario</button>${data.canManage?'<button class="button primary" id="competition-sync-all">Actualizar todos</button><button class="button secondary" id="competition-new">Nueva competición</button>':''}</div></div>${externalAuthHtml}${rows?`<div class="table-wrap"><table><thead><tr><th>División / equipo</th><th>Competición / fase</th><th>Tipo</th><th>Enlaces oficiales</th><th>Sincronización</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('Todavía no hay competiciones configuradas para esta temporada.')}<div id="message" class="message"></div></section>`,'calendar');

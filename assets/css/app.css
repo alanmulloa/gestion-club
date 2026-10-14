@@ -337,3 +337,26 @@ td small { margin-top: .2rem; color: var(--muted); }
 @media (prefers-reduced-motion:reduce){
   .ui-busy-overlay.is-visible.is-passive::before{animation-duration:2.2s;}
 }
+
+
+/* 0.6.45 · feedback de carga centrado y consistente. */
+.ui-busy-overlay.is-visible.is-passive{
+  display:grid;
+  place-items:center;
+  padding:1rem;
+  background:transparent;
+  backdrop-filter:none;
+  pointer-events:none;
+}
+.ui-busy-overlay.is-visible.is-passive::before{display:none;content:none;animation:none;}
+.ui-busy-overlay.is-visible.is-passive .ui-busy-card{
+  display:flex;
+  max-width:min(360px,calc(100vw - 2rem));
+  padding:.82rem 1rem;
+  border-color:color-mix(in srgb,var(--brand) 12%,white);
+  box-shadow:0 14px 42px rgba(15,35,26,.16);
+  background:rgba(255,255,255,.98);
+}
+.ui-busy-overlay.is-visible.is-passive .ui-spinner{width:24px;height:24px;flex-basis:24px;border-width:2px;}
+.ui-busy-overlay.is-visible.is-passive .ui-busy-card small{display:block;}
+.ui-busy-overlay.is-visible.is-blocking .ui-busy-card{max-width:min(390px,calc(100vw - 2rem));}

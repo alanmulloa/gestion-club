@@ -392,7 +392,7 @@ td small { margin-top: .2rem; color: var(--muted); }
 /* 0.6.51 · orden de convocatoria, dorsal único y roles múltiples en disponibilidad */
 .lineup-role{justify-self:start;white-space:nowrap}.lineup-row .input-invalid{border-color:#b42318!important;box-shadow:0 0 0 2px rgba(180,35,24,.12)}
 
-/* 0.6.57 - disponibilidad previa y participacion real */
+/* 0.6.58 - disponibilidad previa y participacion real */
 .availability-preview{margin:1.1rem 0 1.35rem;padding:1rem;border:1px solid var(--line);border-radius:18px;background:var(--surface-soft)}
 .availability-preview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}.availability-preview-grid>div{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:.85rem}.availability-preview-grid h3,.availability-preview-referee h4{margin:0 0 .5rem}.availability-preview-list{margin:0;padding-left:1.05rem}.availability-preview-list li{margin:.28rem 0}.availability-preview-list.staff{padding-left:0;list-style:none}.availability-preview-list.staff li{display:flex;flex-direction:column;gap:.08rem}.availability-preview-list.staff small{color:var(--muted)}.availability-preview-referee{margin-top:.75rem;padding-top:.65rem;border-top:1px dashed var(--line)}.compact-copy{margin:.15rem 0}.match-participation{margin:1rem 0}
 @media(max-width:900px){.availability-preview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.availability-preview-grid{grid-template-columns:1fr}}

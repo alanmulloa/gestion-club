@@ -1,9 +1,9 @@
-const FRONTEND_BUILD = '0.6.57';
+const FRONTEND_BUILD = '0.6.58';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.57';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.58';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -201,6 +201,7 @@ function serverApi(request) {
       : action === 'previewLeagueCalendarImport' ? 60000
       : ['uploadMatchReport','reprocessMatchReport'].includes(action) ? 120000
       : action === 'getStatisticsData' ? 60000
+      : action === 'getCalendarData' ? 45000
       : 30000;
     const timer = setTimeout(() => {
       if (finished) return;
@@ -1481,7 +1482,7 @@ async function renderStatistics(filters={}){
 
 async function renderCalendar(){
   const state=loadUiState_().calendarFilters||{};
-  try{const {data}=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=data;}catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p></section>`,'calendar');}
+  try{const {data}=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=data;}catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p><button class="button primary" id="calendar-retry">Reintentar</button></section>`,'calendar');document.getElementById('calendar-retry')?.addEventListener('click',()=>renderCalendar());return;}
   const d=calendarData;
   if(!calendarViewTouched&&loadUiState_().calendarView)calendarView=loadUiState_().calendarView;
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
@@ -1809,6 +1810,9 @@ async function renderEventDetail(eventId){
   if(e.eventType==='MATCH'){try{officialData=(await call('getMatchPlanningData',{eventId})).data;}catch(ignore){officialData=null;}}
   let availabilityData=null;
   if(['MATCH','TRAINING'].includes(e.eventType)){try{availabilityData=(await call('getEventAvailabilityData',{eventId})).data;}catch(ignore){availabilityData=null;}}
+  // Si un entrenamiento histórico necesitó reconstruir sus asistentes, recargamos una sola vez
+  // los datos del calendario para mostrar la asistencia recién materializada.
+  if(availabilityData?.attendanceBackfilled){calendarData=null;return renderEventDetail(eventId);}
   const linkedStats=officialData?.stats||[],roleByPerson={};linkedStats.forEach(x=>{if(x.personId)roleByPerson[x.personId]=x.lineupRole;});
   const linkedPlayers=parts.filter(x=>(x.roleCategory||x.participantType)==='PLAYER'),linkedCoaches=parts.filter(x=>x.roleCategory==='COACH'),linkedManagers=parts.filter(x=>x.roleCategory==='MANAGER'),linkedCollaborators=parts.filter(x=>x.roleCategory==='COLLABORATOR'),linkedCoordinators=parts.filter(x=>x.roleCategory==='COORDINATOR'),linkedReferees=parts.filter(x=>(x.roleCategory||x.participantType)==='REFEREE'),linkedStaff=parts.filter(x=>x.participantType==='STAFF'&&!x.roleCategory);
   const participantNames=rows=>uniqueBy_(rows,x=>x.personId).map(x=>`<li>${escapeHtml(persons[x.personId]?.displayName||x.personId)}</li>`).join('');

@@ -1,7 +1,9 @@
-const FRONTEND_BUILD = '0.6.41';
+const FRONTEND_BUILD = '0.6.42';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
+const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.42';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -15,6 +17,40 @@ function loadUiState_(){try{return JSON.parse(sessionStorage.getItem(UI_STATE_KE
 function saveUiStatePatch_(patch){const next=Object.assign({},loadUiState_(),patch||{});sessionStorage.setItem(UI_STATE_KEY,JSON.stringify(next));return next;}
 function textNorm_(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
 
+
+
+function readBootstrapCache_(){
+  try { return JSON.parse(sessionStorage.getItem(APP_BOOTSTRAP_CACHE_KEY)||'null'); }
+  catch(_){ return null; }
+}
+function writeBootstrapCache_(data){
+  try {
+    if(!data)return;
+    const safe=JSON.parse(JSON.stringify(data));
+    if(safe.clubConfig&&String(safe.clubConfig.logoDataUrl||'').length>450000)safe.clubConfig.logoDataUrl='';
+    sessionStorage.setItem(APP_BOOTSTRAP_CACHE_KEY,JSON.stringify(safe));
+  } catch(_) { /* cache best effort */ }
+}
+function clearBootstrapCache_(){ try{sessionStorage.removeItem(APP_BOOTSTRAP_CACHE_KEY);}catch(_){} }
+function applyBootstrapData_(data){
+  const d=data||{};
+  if(d.actor)currentUser={email:d.actor.email||'',displayName:d.actor.displayName||'',role:d.actor.role||'MEMBER',personId:d.actor.personId||'',accessProfile:d.actor.accessProfile||{}};
+  if(d.clubConfig){clubConfig=d.clubConfig;applyClubTheme(clubConfig);}
+  if(d.seasonContext){seasonContext=d.seasonContext;const selected=selectedSeasonId_();if(selected!==String(loadUiState_().selectedSeasonId||''))saveUiStatePatch_({selectedSeasonId:selected});}
+  writeBootstrapCache_({actor:d.actor||null,clubConfig:d.clubConfig||null,seasonContext:d.seasonContext||null,cachedAt:new Date().toISOString()});
+}
+function currentNavKey_(){const active=document.querySelector('[data-nav].active');return active?.dataset?.nav||'';}
+function scheduleRuntimeMaintenance_(){
+  if(!currentAccessProfile_().isAdmin)return;
+  try{if(sessionStorage.getItem(RUNTIME_MAINTENANCE_SESSION_KEY)==='DONE')return;}catch(_){}
+  setTimeout(()=>{
+    call('runRuntimeMaintenance').then(()=>{try{sessionStorage.setItem(RUNTIME_MAINTENANCE_SESSION_KEY,'DONE');}catch(_){}}).catch(()=>{});
+  },1400);
+}
+function renderStartupShell_(){
+  root.className='';
+  root.innerHTML=`<main class="container"><section class="panel narrow startup-panel"><span class="eyebrow">Gestión Club</span><h1>Preparando tu sesión</h1><p>Cargando configuración y temporada…</p><div class="inline-loader" aria-label="Cargando"></div></section></main>`;
+}
 
 // 0.6.12 · estabilidad visual y bloqueo de acciones concurrentes.
 // Cada llamada al backend bloquea temporalmente la interfaz para evitar dobles clics,
@@ -172,8 +208,14 @@ function serverApi(request) {
   });
 }
 
+function shouldBlockUiForAction_(action){
+  const a=String(action||'');
+  return /^(login|logout|save|create|update|delete|set|upload|import|reprocess|apply|analyze|sync|process|copy|generate|review|reset|link|refreshMatchReportOfficialData)/i.test(a)
+    || /^(previewLeagueCalendarImport|runTechnicalTest)$/i.test(a);
+}
+
 async function call(action, payload = {}, fixedRequestId = null) {
-  const busyToken = beginUiBusy_(busyMessageForAction_(action));
+  const busyToken = shouldBlockUiForAction_(action) ? beginUiBusy_(busyMessageForAction_(action)) : 0;
   try {
     const response = await serverApi({
       action,
@@ -191,7 +233,7 @@ async function call(action, payload = {}, fixedRequestId = null) {
     }
     return response;
   } finally {
-    endUiBusy_(busyToken);
+    if (busyToken) endUiBusy_(busyToken);
   }
 }
 
@@ -215,6 +257,7 @@ function clearSession() {
   clubConfig = null;
   seasonContext = null;
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  clearBootstrapCache_();
 }
 
 function applyClubTheme(settings) {
@@ -377,9 +420,10 @@ function renderLogin() {
         password: document.getElementById('password').value
       });
       saveSession(response.data);
-      await loadClubConfig();
-      await loadSeasonContext_(true);
+      const boot=(await call('getAppBootstrap')).data;
+      applyBootstrapData_(boot);
       await renderDashboard();
+      scheduleRuntimeMaintenance_();
     } catch (error) {
       showMessage(error.message, 'error');
       button.disabled = false;
@@ -435,7 +479,7 @@ async function renderDashboard() {
   wire('go-seasons',renderSeasons);
   wire('go-settings',renderClubSettings);
   document.getElementById('refresh-status').onclick = loadStatus;
-  await loadStatus();
+  void loadStatus();
 }
 
 async function loadStatus() {
@@ -1205,15 +1249,22 @@ async function start() {
     return shell('<section class="panel narrow"><h1>Configuración de autenticación no compatible</h1><p>El backend no informa el modo SHEETS_PASSWORD esperado.</p></section>');
   }
   if (!sessionToken) return renderLogin();
-  currentUser = { email: 'Sesión guardada', role: '' };
-  try {
-    const { data } = await call('status');
-    currentUser = { email:data.actor.email, displayName:data.actor.displayName||'', role:data.actor.role, personId:data.actor.personId||'', accessProfile:data.actor.accessProfile||{} };
-    await loadClubConfig();
-    await loadSeasonContext_(true);
+  const cached=readBootstrapCache_();
+  if(cached?.actor&&cached?.clubConfig&&cached?.seasonContext){
+    applyBootstrapData_(cached);
     await renderDashboard();
+  }else{
+    currentUser={email:'Sesión guardada',role:'MEMBER',accessProfile:{capabilities:{}}};
+    renderStartupShell_();
+  }
+  try {
+    const {data}=await call('getAppBootstrap');
+    applyBootstrapData_(data);
+    if(!cached||currentNavKey_()==='home'||!currentNavKey_())await renderDashboard();
+    scheduleRuntimeMaintenance_();
   } catch (error) {
     if (!sessionToken) return renderLogin();
+    if(cached){showToast_('No se pudo refrescar la sesión. Se muestran los últimos datos disponibles.','warning',4000);return;}
     shell(`<section class="panel narrow"><h1>No se pudo recuperar la sesión</h1><p>${escapeHtml(error.message)}</p><button class="button primary" id="back-login">Volver al acceso</button></section>`);
     document.getElementById('back-login').onclick = () => { clearSession(); renderLogin(); };
   }

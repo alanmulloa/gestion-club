@@ -360,3 +360,16 @@ td small { margin-top: .2rem; color: var(--muted); }
 .ui-busy-overlay.is-visible.is-passive .ui-spinner{width:24px;height:24px;flex-basis:24px;border-width:2px;}
 .ui-busy-overlay.is-visible.is-passive .ui-busy-card small{display:block;}
 .ui-busy-overlay.is-visible.is-blocking .ui-busy-card{max-width:min(390px,calc(100vw - 2rem));}
+
+/* 0.6.47 · disponibilidad deportiva, bajas y ausencias */
+.status-pill.danger{color:#8a1f24;background:#fde7e8}
+.availability-blocked-row{background:rgba(180,45,52,.045)}
+.availability-blocked-row td:first-child strong{color:#8a1f24}
+.lineup-row.disabled{opacity:.62;background:#f7f4f4}
+.availability-current{display:grid;gap:.75rem;margin:.25rem 0 1rem}
+.availability-period-card{padding:1rem;border:1px solid var(--line);border-radius:1rem;background:#fafbf8}
+.availability-period-card.active{border-left:4px solid var(--brand)}
+.availability-period-card h3{margin:.15rem 0 .25rem}
+.availability-period-card p{margin:0;color:var(--muted)}
+.availability-period-card small{display:block;margin-top:.35rem;color:var(--muted)}
+@media(max-width:760px){.availability-blocked-row td{min-width:140px}.availability-period-card{padding:.85rem}}

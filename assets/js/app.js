@@ -1,9 +1,9 @@
-const FRONTEND_BUILD = '0.6.61';
+const FRONTEND_BUILD = '0.6.62';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.61';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.62';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -293,14 +293,21 @@ function applyClubTheme(settings) {
   style.setProperty('--accent', accent);
 }
 
+function publicAssetUrl_(path) {
+  const base=String(window.GC_FRONTEND_BASE_URL||'https://alanmulloa.github.io/gestion-club').replace(/\/+$/,'');
+  return `${base}/${String(path||'').replace(/^\/+/, '')}`;
+}
 function brandMarkup() {
-  const name = clubConfig?.shortName || clubConfig?.officialName || config.appName || 'Gestión Club';
-  const logo = clubConfig?.logoDataUrl
-    ? `<img class="brand-logo" src="${escapeHtml(clubConfig.logoDataUrl)}" alt="Logo">`
+  const unauthenticated=!currentUser;
+  const name = unauthenticated ? 'MRC' : (clubConfig?.shortName || clubConfig?.officialName || config.appName || 'Gestión Club');
+  const logoSrc=clubConfig?.logoDataUrl || (unauthenticated?publicAssetUrl_('assets/img/mrc-logo.png'):'');
+  const logo = logoSrc
+    ? `<img class="brand-logo" src="${escapeHtml(logoSrc)}" alt="Escudo del club">`
     : `<span class="brand-mark">${escapeHtml((clubConfig?.shortName || 'GC').slice(0, 2).toUpperCase())}</span>`;
   const backendVersion=String(config.appVersion||'?');
   const mismatch=backendVersion!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:'';
-  return `${logo}<div><strong>${escapeHtml(name)}</strong><small>Versión ${escapeHtml(backendVersion)}${mismatch} · ${escapeHtml(config.environment || 'sin configurar')}</small></div>`;
+  const sub=unauthenticated?`Gestión Club · Versión ${escapeHtml(backendVersion)}${mismatch}`:`Versión ${escapeHtml(backendVersion)}${mismatch} · ${escapeHtml(config.environment || 'sin configurar')}`;
+  return `${logo}<div><strong>${escapeHtml(name)}</strong><small>${sub}</small></div>`;
 }
 
 function roleDisplayName(role) {
@@ -383,6 +390,7 @@ function isMobileViewport(){ return window.matchMedia && window.matchMedia('(max
 
 function shell(content, active = 'home') {
   root.className = '';
+  document.body.classList.toggle('login-mode', !currentUser);
   root.innerHTML = `
     <header class="topbar">
       <div class="brand">${brandMarkup()}</div>
@@ -420,20 +428,27 @@ function showMessage(message, kind = 'info', hostId = 'message') {
 }
 
 function renderLogin() {
-  applyClubTheme(clubConfig);
+  // Antes de autenticar todavía no podemos leer la configuración privada del club.
+  // Usamos la identidad visual MRC para que el acceso tenga el mismo lenguaje que la aplicación.
+  applyClubTheme({primaryColor:'#2b4168',secondaryColor:'#21375e',accentColor:'#919b17'});
+  const publicLogo=publicAssetUrl_('assets/img/mrc-logo.png');
   shell(`
-    <section class="hero narrow">
-      <span class="eyebrow">Gestión deportiva</span>
-      <h1>Acceso al club</h1>
-      <p>Inicia sesión con la cuenta creada por la administración.</p>
-    </section>
-    <section class="panel narrow">
-      <form id="login-form" class="form-stack">
-        <label>Correo electrónico<input id="email" type="email" autocomplete="username" required></label>
-        <label>Contraseña<input id="password" type="password" autocomplete="current-password" required></label>
-        <button class="button primary" type="submit">Entrar</button>
-      </form>
-      <div id="message" class="message" aria-live="polite"></div>
+    <section class="login-layout">
+      <div class="login-intro">
+        <span class="eyebrow">Gestión deportiva</span>
+        <h1>Acceso al club</h1>
+        <p>Entrá con la cuenta creada por la administración para consultar tu actividad, disponibilidad y gestión deportiva.</p>
+        <div class="login-club"><img src="${escapeHtml(publicLogo)}" alt="Marbella Rugby Club"><div><strong>Marbella Rugby Club</strong><small>Gestión Club · ${escapeHtml(config.environment || 'DEV')}</small></div></div>
+      </div>
+      <section class="panel login-panel">
+        <div class="login-panel-heading"><span class="eyebrow">Cuenta</span><h2>Iniciar sesión</h2><p>Usá tu correo y contraseña de Gestión Club.</p></div>
+        <form id="login-form" class="form-stack">
+          <label>Correo electrónico<input id="email" type="email" autocomplete="username" inputmode="email" required placeholder="nombre@correo.com"></label>
+          <label>Contraseña<input id="password" type="password" autocomplete="current-password" required placeholder="Contraseña"></label>
+          <button class="button primary login-submit" type="submit">Entrar</button>
+        </form>
+        <div id="message" class="message" aria-live="polite"></div>
+      </section>
     </section>`);
 
   document.getElementById('login-form').onsubmit = async event => {
@@ -1832,6 +1847,43 @@ function eventAvailabilityPreviewHtml_(data,event){
   const open=!!data.isOpenForAvailability;
   return `<section class="availability-preview"><div class="panel-heading"><div><span class="eyebrow">Antes de la actividad</span><h2>Disponibilidad previa</h2><p>${open?'Se calcula automáticamente. Si necesitás cambiar una baja o ausencia, entrá en Gestionar disponibilidad.':'Foto congelada al comenzar la actividad. Desde este momento los cambios se registran en asistencia/participación real.'}</p></div><span class="status-pill ${open?'active':''}">${open?'Editable':'Cerrada'}</span></div><div class="attendance-summary"><span><strong>${players.length}</strong> jugadores</span><span><strong>${available.length}</strong> disponibles</span><span><strong>${absences.length}</strong> ausencias</span><span><strong>${injured.length}</strong> bajas</span></div><div class="availability-preview-grid"><div><h3>Disponibles</h3>${nameList(available,'Sin jugadores disponibles.')}</div><div><h3>Ausencias</h3>${nameList(absences,'Sin ausencias.')}</div><div><h3>Bajas / lesionados</h3>${nameList(injured,'Sin bajas activas.')}</div><div><h3>Staff</h3>${staffList}${refereeList}</div></div></section>`;
 }
+function clockToMinutes_(value){const m=/^(\d{2}):(\d{2})$/.exec(String(value||''));return m?Number(m[1])*60+Number(m[2]):null;}
+function minutesToClock_(value){if(value===null||value===undefined||Number.isNaN(Number(value)))return '';const v=((Number(value)%1440)+1440)%1440;return `${String(Math.floor(v/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`;}
+function trainingSessionComputedBlocks_(data){
+  const e=data?.event||{},blocks=(data?.blocks||[]).slice().sort((a,b)=>Number(a.sortOrder||999)-Number(b.sortOrder||999));
+  let cursor=clockToMinutes_(e.startTime);return blocks.map((b,index)=>{const duration=Math.max(0,Number(b.durationMinutes||0)),explicit=clockToMinutes_(b.startTime),start=explicit===null?cursor:explicit,end=start===null?null:start+duration;if(end!==null)cursor=end;return Object.assign({},b,{computedStartTime:start===null?'':minutesToClock_(start),computedEndTime:end===null?'':minutesToClock_(end),computedOrder:index+1});});
+}
+function trainingSessionPersonName_(data,id){return (data?.staff||[]).find(p=>p.personId===id)?.displayName||'';}
+function trainingSessionExercise_(data,id){return (data?.exercises||[]).find(x=>x.exerciseId===id)||null;}
+function trainingSessionPlanHtml_(data){
+  const e=data?.event||{},blocks=trainingSessionComputedBlocks_(data),total=blocks.reduce((n,b)=>n+Number(b.durationMinutes||0),0),eventStart=clockToMinutes_(e.startTime),eventEnd=clockToMinutes_(e.endTime),eventMinutes=eventStart!==null&&eventEnd!==null?Math.max(0,eventEnd-eventStart):0;
+  const previous=data?.previousTraining,manage=!!data?.canManage;
+  const previousHint=previous?`<div class="info-strip"><strong>Último entrenamiento con plan:</strong> ${escapeHtml(previous.event?.title||'Entrenamiento')} · ${escapeHtml(previous.event?.eventDate||'')} · ${previous.blockCount||0} bloque(s).</div>`:'';
+  const durationStatus=eventMinutes?`<span class="status-pill ${total>eventMinutes?'warning':'active'}">${total} / ${eventMinutes} min</span>`:`<span class="status-pill">${total} min planificados</span>`;
+  const cards=blocks.map((b,index)=>{const ex=trainingSessionExercise_(data,b.exerciseId),responsible=trainingSessionPersonName_(data,b.responsiblePersonId),referee=trainingSessionPersonName_(data,b.refereePersonId),same=!!responsible&&!!referee&&b.responsiblePersonId===b.refereePersonId;const points=ex?trainingExerciseCoachingPoints_(ex).slice(0,3):[];return `<article class="training-plan-block" data-training-block="${escapeHtml(b.trainingBlockId)}"><div class="training-plan-time"><strong>${escapeHtml(b.computedStartTime||'—')}</strong><span>${escapeHtml(b.computedEndTime||'')}</span><small>${escapeHtml(String(b.durationMinutes||0))} min</small></div><div class="training-plan-main"><div class="training-plan-block-head"><div><span class="eyebrow">Bloque ${index+1}${ex?' · '+escapeHtml(trainingExerciseCategoryClient_(ex.category)):''}</span><h3>${escapeHtml(b.title||ex?.name||'Bloque')}</h3></div>${manage?`<div class="button-row compact-actions"><button class="button mini secondary" data-plan-move-up="${escapeHtml(b.trainingBlockId)}" ${index===0?'disabled':''}>↑</button><button class="button mini secondary" data-plan-move-down="${escapeHtml(b.trainingBlockId)}" ${index===blocks.length-1?'disabled':''}>↓</button><button class="button mini secondary" data-plan-edit="${escapeHtml(b.trainingBlockId)}">Editar</button><button class="button mini link danger-text" data-plan-delete="${escapeHtml(b.trainingBlockId)}">Borrar</button></div>`:''}</div>${ex?.objective?`<p>${escapeHtml(ex.objective)}</p>`:''}<div class="training-plan-meta">${b.groupName?`<span><strong>Grupo:</strong> ${escapeHtml(b.groupName)}</span>`:''}${responsible?`<span><strong>Responsable:</strong> ${escapeHtml(responsible)}</span>`:''}${referee?`<span><strong>Árbitro:</strong> ${escapeHtml(referee)}</span>`:''}</div>${same?'<div class="message warning compact-message">La misma persona figura como responsable y árbitro en este bloque.</div>':''}${points.length?`<ul class="exercise-points-preview">${points.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}${b.notes?`<p class="muted pre-line">${escapeHtml(b.notes)}</p>`:''}${ex?.videoUrl?`<a class="button mini link" href="${escapeHtml(ex.videoUrl)}" target="_blank" rel="noopener">Vídeo / enlace</a>`:''}</div></article>`;}).join('');
+  return `<section class="training-plan-section"><div class="panel-heading"><div><span class="eyebrow">Planificación</span><h2>Plan del entrenamiento</h2><p>Construí la sesión por bloques reutilizando la biblioteca de ejercicios. La planificación queda en solo lectura cuando empieza el entrenamiento.</p></div>${durationStatus}</div>${previousHint}${manage?`<div class="button-row"><button class="button primary" id="new-training-block">Añadir bloque</button>${previous?'<button class="button secondary" id="copy-previous-training-plan">Copiar último entrenamiento</button>':''}<button class="button secondary" id="open-exercise-library">Biblioteca de ejercicios</button></div>`:''}${cards?`<div class="training-plan-timeline">${cards}</div>`:emptyTable(manage?'Todavía no hay bloques. Añadí el primero o copiá el último entrenamiento.':'Todavía no hay un plan cargado para este entrenamiento.')}${eventMinutes&&total>eventMinutes?`<div class="message warning">El plan suma ${total} min y supera en ${total-eventMinutes} min la duración del entrenamiento.</div>`:''}</section>`;
+}
+function nextTrainingBlockStart_(data){const blocks=trainingSessionComputedBlocks_(data);if(blocks.length)return blocks[blocks.length-1].computedEndTime||data?.event?.startTime||'';return data?.event?.startTime||'';}
+function openTrainingBlockEditor_(eventId,data,block={}){
+  const exercises=data?.exercises||[],staff=data?.staff||[],currentExercise=trainingSessionExercise_(data,block.exerciseId),computedCurrent=trainingSessionComputedBlocks_(data).find(x=>x.trainingBlockId===block.trainingBlockId),defaultStart=block.startTime||computedCurrent?.computedStartTime||nextTrainingBlockStart_(data),duration=block.durationMinutes||currentExercise?.recommendedDurationMinutes||'10';
+  const exOptions='<option value="">Bloque libre / sin ejercicio</option>'+exercises.map(ex=>`<option value="${escapeHtml(ex.exerciseId)}" ${ex.exerciseId===block.exerciseId?'selected':''}>${escapeHtml(ex.name)} · ${escapeHtml(trainingExerciseCategoryClient_(ex.category))}</option>`).join('');
+  const staffOptions='<option value="">— Sin asignar —</option>'+staff.map(p=>`<option value="${escapeHtml(p.personId)}">${escapeHtml(p.displayName)}</option>`).join('');
+  editorShell(block.trainingBlockId?'Editar bloque':'Nuevo bloque','El responsable y la persona que arbitra son opcionales. Si coinciden, se mostrará una advertencia en el plan.',`<div class="form-grid two"><label>Ejercicio<select id="plan-exercise">${exOptions}</select></label><label>Nombre del bloque<input id="plan-title" maxlength="160" value="${escapeHtml(block.title||currentExercise?.name||'')}"></label><label>Hora inicio<input id="plan-start" type="time" value="${escapeHtml(defaultStart)}"></label><label>Duración (min)<input id="plan-duration" type="number" min="1" max="240" required value="${escapeHtml(duration)}"></label><label>Responsable<select id="plan-responsible">${staffOptions}</select></label><label>Árbitro / oposición arbitral<select id="plan-referee">${staffOptions}</select></label><label>Grupo / unidad<input id="plan-group" maxlength="120" value="${escapeHtml(block.groupName||'')}" placeholder="Ej. delanteros, backs, grupo 1"></label></div><label>Observaciones del bloque<textarea id="plan-notes" rows="3" maxlength="1200" placeholder="Ajustes específicos para esta sesión">${escapeHtml(block.notes||'')}</textarea></label>`,'Guardar bloque');
+  document.getElementById('plan-responsible').value=block.responsiblePersonId||'';document.getElementById('plan-referee').value=block.refereePersonId||'';
+  const exSelect=document.getElementById('plan-exercise');exSelect.onchange=()=>{const ex=trainingSessionExercise_(data,exSelect.value);if(!ex)return;const title=document.getElementById('plan-title'),dur=document.getElementById('plan-duration');if(!title.value.trim())title.value=ex.name||'';if(!dur.value&&ex.recommendedDurationMinutes)dur.value=ex.recommendedDurationMinutes;};
+  document.getElementById('entity-form').onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;try{await call('saveTrainingSessionBlock',{eventId,trainingBlockId:block.trainingBlockId||'',exerciseId:val('plan-exercise'),title:val('plan-title'),startTime:val('plan-start'),durationMinutes:val('plan-duration'),responsiblePersonId:val('plan-responsible'),refereePersonId:val('plan-referee'),groupName:val('plan-group'),notes:val('plan-notes'),sortOrder:block.sortOrder||''});showToast_('Bloque guardado.');await renderEventDetail(eventId,'plan');}catch(err){showMessage(err.message,'error','editor-message');if(button)button.disabled=false;}};
+}
+function wireTrainingSessionPlan_(eventId,data){
+  document.getElementById('new-training-block')?.addEventListener('click',()=>openTrainingBlockEditor_(eventId,data,{}));
+  document.getElementById('open-exercise-library')?.addEventListener('click',()=>renderTrainingExercises());
+  document.getElementById('copy-previous-training-plan')?.addEventListener('click',async()=>{const has=(data.blocks||[]).length>0;if(has&&!confirm('El plan actual será reemplazado por el último entrenamiento. ¿Continuar?'))return;try{await call('copyPreviousTrainingSessionPlan',{eventId,overwrite:has});showToast_('Plan anterior copiado.');await renderEventDetail(eventId,'plan');}catch(err){showMessage(err.message,'error');}});
+  document.querySelectorAll('[data-plan-edit]').forEach(btn=>btn.onclick=()=>{const block=(data.blocks||[]).find(x=>x.trainingBlockId===btn.dataset.planEdit);if(block)openTrainingBlockEditor_(eventId,data,block);});
+  document.querySelectorAll('[data-plan-delete]').forEach(btn=>btn.onclick=async()=>{if(!confirm('¿Borrar este bloque del entrenamiento?'))return;try{await call('deleteTrainingSessionBlock',{eventId,trainingBlockId:btn.dataset.planDelete});showToast_('Bloque eliminado.');await renderEventDetail(eventId,'plan');}catch(err){showMessage(err.message,'error');}});
+  const move=async(id,delta)=>{const ids=(data.blocks||[]).slice().sort((a,b)=>Number(a.sortOrder||999)-Number(b.sortOrder||999)).map(x=>x.trainingBlockId),i=ids.indexOf(id),j=i+delta;if(i<0||j<0||j>=ids.length)return;[ids[i],ids[j]]=[ids[j],ids[i]];try{await call('reorderTrainingSessionBlocks',{eventId,trainingBlockIds:ids});await renderEventDetail(eventId,'plan');}catch(err){showMessage(err.message,'error');}};
+  document.querySelectorAll('[data-plan-move-up]').forEach(btn=>btn.onclick=()=>move(btn.dataset.planMoveUp,-1));
+  document.querySelectorAll('[data-plan-move-down]').forEach(btn=>btn.onclick=()=>move(btn.dataset.planMoveDown,1));
+}
+
 async function renderEventAvailability(eventId){
   try{
     const {data}=await call('getEventAvailabilityData',{eventId});const e=data.event,candidates=data.candidates||[];
@@ -1892,7 +1944,10 @@ async function renderEventDetail(eventId,requestedSection=''){
   if(e.eventType==='TRAINING'){
     const attendanceExists=['IN_PROGRESS','COMPLETED'].includes(e.status)||!!e.attendanceClosedAt;
     const section=requestedSection||(attendanceExists?'attendance':'availability');
-    let availabilityData=null;
+    let availabilityData=null,trainingPlanData=null;
+    if(section==='plan'){
+      try{trainingPlanData=(await call('getTrainingSessionPlanData',{eventId})).data;}catch(err){trainingPlanData={event:e,blocks:[],exercises:[],staff:[],canManage:false,error:err.message};}
+    }
     if(section==='availability'||(section==='attendance'&&['IN_PROGRESS','COMPLETED'].includes(e.status)&&!parts.length)){
       try{availabilityData=(await call('getEventAvailabilityData',{eventId})).data;}catch(ignore){availabilityData=null;}
       if(availabilityData?.attendanceBackfilled){invalidateCalendarCaches_();return renderEventDetail(eventId,section);}
@@ -1900,7 +1955,8 @@ async function renderEventDetail(eventId,requestedSection=''){
     const header=activityHeaderHtml_(e,meta);
     const tabs=eventWorkspaceTabsHtml_(e,section,{attendanceExists:true});
     let content='';
-    if(section==='attendance')content=trainingAttendanceHtml_(parts,persons,e,canEdit);
+    if(section==='plan')content=trainingPlanData?.error?`<div class="message error">${escapeHtml(trainingPlanData.error)}</div>`:trainingSessionPlanHtml_(trainingPlanData);
+    else if(section==='attendance')content=trainingAttendanceHtml_(parts,persons,e,canEdit);
     else if(section==='survey')content=`<section class="post-training-survey"><div><span class="eyebrow">Post-entrenamiento</span><h2>Encuesta del entrenamiento</h2><p>${e.status==='COMPLETED'?'La actividad finalizó. La encuesta quedará asociada a este entrenamiento cuando definamos sus preguntas.':'La encuesta se habilitará al finalizar el entrenamiento.'}</p></div><span class="status-pill warning">Pendiente</span></section>`;
     else {
       if(!availabilityData){try{availabilityData=(await call('getEventAvailabilityData',{eventId})).data;}catch(ignore){availabilityData=null;}}
@@ -1910,6 +1966,7 @@ async function renderEventDetail(eventId,requestedSection=''){
     shell(`${header}<section class="panel match-detail-panel">${tabs}${e.notes?`<div class="match-note">${escapeHtml(e.notes)}</div>`:''}<div id="editor-host"></div><div class="event-section-host">${content}</div>${adminActions}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar');
     wireEventWorkspaceTabs_(eventId,e,{attendanceExists:true});
     document.getElementById('back-calendar').onclick=renderCalendar;const ma=document.getElementById('manage-availability-inline');if(ma)ma.onclick=()=>renderEventAvailability(eventId);
+    if(section==='plan'&&trainingPlanData&&!trainingPlanData.error)wireTrainingSessionPlan_(eventId,trainingPlanData);
     const eb=document.getElementById('edit-event');if(eb)eb.onclick=()=>renderEventEditor(eventId);
     const changeState=async(status,payload={})=>{try{await call('setEventState',Object.assign({eventId,status},payload));invalidateCalendarCaches_();await renderEventDetail(eventId);}catch(err){showMessage(err.message,'error');}};
     const cb=document.getElementById('cancel-activity');if(cb)cb.onclick=()=>{if(confirm('¿Cancelar esta actividad? Se conservará en el historial.'))changeState('CANCELLED');};
@@ -2086,6 +2143,7 @@ function eventWorkspaceTabsHtml_(event,active,opts={}){
   const buttons=[];
   if(match&&opts.summaryExists)buttons.push(`<button class="button ${active==='summary'?'primary':'secondary'}" data-event-tab="summary">Resumen</button>`);
   if(match)buttons.push(`<button class="button ${active==='convocados'?'primary':'secondary'}" data-event-tab="convocados">Convocados</button>`);
+  if(training)buttons.push(`<button class="button ${active==='plan'?'primary':'secondary'}" data-event-tab="plan">Plan</button>`);
   if(training&&opts.attendanceExists)buttons.push(`<button class="button ${active==='attendance'?'primary':'secondary'}" data-event-tab="attendance">Asistencia</button>`);
   if(match||training)buttons.push(`<button class="button ${active==='availability'?'primary':'secondary'}" data-event-tab="availability">Disponibilidad previa</button>`);
   if(training)buttons.push(`<button class="button ${active==='survey'?'primary':'secondary'}" data-event-tab="survey">Encuesta del entreno</button>`);

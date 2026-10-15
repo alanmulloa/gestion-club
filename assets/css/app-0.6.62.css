@@ -440,3 +440,30 @@ td small { margin-top: .2rem; color: var(--muted); }
 .exercise-division-fieldset>p{margin:0 0 12px;color:var(--muted,#65726a);font-size:.88rem}
 .exercise-division-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 14px}
 @media(max-width:760px){.exercise-library-grid{grid-template-columns:1fr}.exercise-detail-grid{grid-template-columns:1fr}.exercise-card-media{height:150px}}
+
+/* 0.6.62 - login MRC y constructor de sesión */
+.login-mode{background:radial-gradient(circle at 82% 5%,rgba(145,155,23,.12) 0,transparent 34%),#f4f6f5}
+.login-mode .topbar{background:#21375e;padding-block:.8rem}
+.login-mode .topbar .brand-logo{width:3.2rem;height:3.2rem;border-radius:.8rem;padding:.12rem}
+.login-mode .topbar .brand strong{font-size:1.05rem}
+.login-mode .container{max-width:1180px;padding-top:clamp(2.5rem,8vh,6rem);padding-bottom:4rem}
+.login-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,520px);gap:clamp(2rem,6vw,6rem);align-items:center;min-height:520px}
+.login-intro{max-width:600px}
+.login-intro h1{font-size:clamp(3rem,6vw,5.6rem);line-height:.96;letter-spacing:-.055em;margin:.45rem 0 1.15rem;color:#17211b}
+.login-intro>p{max-width:560px;font-size:1.08rem;line-height:1.65;color:var(--muted)}
+.login-club{display:flex;align-items:center;gap:1rem;margin-top:2rem;padding:1rem 1.15rem;border:1px solid var(--line);border-radius:1.15rem;background:rgba(255,255,255,.72);width:max-content;max-width:100%}
+.login-club img{width:64px;height:64px;object-fit:contain;border-radius:.8rem;background:#fff}
+.login-club strong,.login-club small{display:block}.login-club strong{font-size:1rem;color:#21375e}.login-club small{margin-top:.18rem;color:var(--muted)}
+.login-panel{width:auto;margin:0;padding:clamp(1.5rem,3vw,2.2rem);border-radius:1.35rem;box-shadow:0 22px 60px rgba(33,55,94,.13)}
+.login-panel-heading{margin-bottom:1.25rem}.login-panel-heading h2{font-size:1.65rem;margin:.25rem 0 .35rem}.login-panel-heading p{margin:0;color:var(--muted)}
+.login-panel input{min-height:48px;background:#fff}.login-submit{width:100%;min-height:48px;font-size:1rem;background:#2b4168}.login-mode footer{color:#67736c}
+@media(max-width:860px){.login-mode .container{padding-top:2rem}.login-layout{grid-template-columns:1fr;gap:1.6rem;min-height:0}.login-intro{max-width:none}.login-intro h1{font-size:clamp(2.6rem,12vw,4rem)}.login-club{margin-top:1.35rem}.login-panel{max-width:none}}
+@media(max-width:520px){.login-mode .topbar{padding:.7rem 1rem}.login-mode .topbar .brand-logo{width:2.6rem;height:2.6rem}.login-intro>p{font-size:1rem}.login-club img{width:52px;height:52px}.login-panel{padding:1.2rem}}
+
+.training-plan-section{display:grid;gap:1rem}
+.training-plan-timeline{display:grid;gap:.85rem;position:relative;margin-top:.25rem}
+.training-plan-timeline:before{content:"";position:absolute;left:62px;top:18px;bottom:18px;width:2px;background:linear-gradient(var(--brand),color-mix(in srgb,var(--brand) 15%,white));opacity:.35}
+.training-plan-block{display:grid;grid-template-columns:110px minmax(0,1fr);gap:1rem;position:relative;border:1px solid var(--line);border-radius:1rem;background:#fff;padding:1rem}
+.training-plan-time{display:flex;flex-direction:column;align-items:flex-start;gap:.08rem;position:relative;z-index:1}.training-plan-time:before{content:"";position:absolute;left:57px;top:8px;width:12px;height:12px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px #fff}.training-plan-time strong{font-size:1.1rem;color:var(--brand-dark)}.training-plan-time span,.training-plan-time small{font-size:.78rem;color:var(--muted)}
+.training-plan-main{min-width:0}.training-plan-block-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}.training-plan-block-head h3{margin:.18rem 0 .35rem;font-size:1.15rem}.training-plan-block-head .eyebrow{font-size:.68rem}.training-plan-meta{display:flex;gap:.75rem 1.1rem;flex-wrap:wrap;margin:.5rem 0;font-size:.84rem;color:var(--muted)}.training-plan-meta strong{color:var(--ink)}.compact-message{margin:.55rem 0;padding:.55rem .7rem}
+@media(max-width:700px){.training-plan-timeline:before{display:none}.training-plan-block{grid-template-columns:1fr}.training-plan-time{display:grid;grid-template-columns:auto auto 1fr;gap:.45rem;align-items:center}.training-plan-time:before{display:none}.training-plan-block-head{flex-direction:column}.training-plan-block-head .button-row{width:100%;justify-content:flex-start}}

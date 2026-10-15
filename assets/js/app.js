@@ -1,10 +1,10 @@
-const FRONTEND_BUILD = '0.6.71';
+const FRONTEND_BUILD = '0.6.72';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.71';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.72';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let simulationCandidates = [];
@@ -1529,7 +1529,7 @@ function displayEventTime_(e){const t=String(e?.startTime||'').trim();return !t|
 function eventSortTime_(e){const t=displayEventTime_(e);return /^\d{2}:\d{2}$/.test(t)?t:'99:99';}
 function sortCalendarEvents_(rows){return (rows||[]).slice().sort((a,b)=>String(a.eventDate||'').localeCompare(String(b.eventDate||''))||eventSortTime_(a).localeCompare(eventSortTime_(b))||String(a.title||'').localeCompare(String(b.title||''),'es'));}
 function eventVisualClass_(e){return e.eventType==='MATCH'?'match':e.eventType==='REST'?'rest':e.eventType==='RECOVERY'?'recovery':'training';}
-function divisionColorForEvent_(e){if(e?.divisionColor)return normalizeHexColor_(e.divisionColor);const d=(calendarData?.divisions||[]).find(x=>x.divisionId===e.divisionId);return d?.color||'#64748B';}
+function divisionColorForEvent_(e){if(isExternalRefereeMatchClient_(e))return '#B45309';if(e?.divisionColor)return normalizeHexColor_(e.divisionColor);const d=(calendarData?.divisions||[]).find(x=>x.divisionId===e.divisionId);return d?.color||'#64748B';}
 function normalizeHexColor_(value){const v=String(value||'').trim().toUpperCase();return /^#[0-9A-F]{6}$/.test(v)?v:'#64748B';}
 function mixHexColor_(base,target,amount){
   const a=normalizeHexColor_(base),b=normalizeHexColor_(target);const t=Math.max(0,Math.min(1,amount));
@@ -1539,7 +1539,7 @@ function mixHexColor_(base,target,amount){
 }
 function divisionColorVariants_(base){const c=normalizeHexColor_(base);return {strong:mixHexColor_(c,'#000000',.12),medium:mixHexColor_(c,'#FFFFFF',.46),light:mixHexColor_(c,'#FFFFFF',.82)};}
 function divisionEventStyle_(e){const base=divisionColorForEvent_(e),v=divisionColorVariants_(base);return `--division-color:${escapeHtml(base)};--division-strong:${escapeHtml(v.strong)};--division-medium:${escapeHtml(v.medium)};--division-light:${escapeHtml(v.light)}`;}
-function teamPatternForEvent_(e){if(e.eventType==='TRAINING'||!e.teamId)return 'SOLID';if(e?.teamPattern)return e.teamPattern;const t=(calendarData?.teams||[]).find(x=>x.teamId===e.teamId);return t?.displayPattern||'SOLID';}
+function teamPatternForEvent_(e){if(isExternalRefereeMatchClient_(e)||e.eventType==='TRAINING'||!e.teamId)return 'SOLID';if(e?.teamPattern)return e.teamPattern;const t=(calendarData?.teams||[]).find(x=>x.teamId===e.teamId);return t?.displayPattern||'SOLID';}
 function teamPatternClass_(e){const p=teamPatternForEvent_(e);return p==='STRIPED'?'team-pattern-striped':p==='DOTTED'?'team-pattern-dotted':'team-pattern-solid';}
 function eventStatusLabel(s){return ({PENDING:'Pendiente',SCHEDULED:'Programado',IN_PROGRESS:'En curso',COMPLETED:'Finalizado',CANCELLED:'Cancelado',POSTPONED:'Postergado'})[s]||s;}
 function competitionTypeLabelClient_(t){return ({LEAGUE:'Liga',CUP:'Copa',TOURNAMENT:'Torneo',FRIENDLY:'Amistoso',OTHER:'Otro'})[t]||t||'Liga';}

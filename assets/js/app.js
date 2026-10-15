@@ -1,12 +1,14 @@
-const FRONTEND_BUILD = '0.6.68';
+const FRONTEND_BUILD = '0.6.69';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.68';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.69';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
+let simulationCandidates = [];
+let simulationState = {personId:'',displayName:'',email:'',accessProfile:null,allowActions:false};
 let clubConfig = null;
 let structureData = null;
 let statisticsData = null;
@@ -47,9 +49,10 @@ function clearBootstrapCache_(){ try{sessionStorage.removeItem(APP_BOOTSTRAP_CAC
 function applyBootstrapData_(data){
   const d=data||{};
   if(d.actor)currentUser={email:d.actor.email||'',displayName:d.actor.displayName||'',role:d.actor.role||'MEMBER',personId:d.actor.personId||'',accessProfile:d.actor.accessProfile||{}};
+  simulationCandidates=Array.isArray(d.simulationCandidates)?d.simulationCandidates:simulationCandidates;
   if(d.clubConfig){clubConfig=d.clubConfig;applyClubTheme(clubConfig);}
   if(d.seasonContext){seasonContext=d.seasonContext;const selected=selectedSeasonId_();if(selected!==String(loadUiState_().selectedSeasonId||''))saveUiStatePatch_({selectedSeasonId:selected});}
-  writeBootstrapCache_({actor:d.actor||null,clubConfig:d.clubConfig||null,seasonContext:d.seasonContext||null,cachedAt:new Date().toISOString()});
+  writeBootstrapCache_({actor:d.actor||null,clubConfig:d.clubConfig||null,seasonContext:d.seasonContext||null,simulationCandidates:simulationCandidates||[],cachedAt:new Date().toISOString()});
 }
 function currentNavKey_(){const active=document.querySelector('[data-nav].active');return active?.dataset?.nav||'';}
 function scheduleRuntimeMaintenance_(){
@@ -236,6 +239,15 @@ function serverApi(request) {
   });
 }
 
+function realUserIsAdmin_(){return currentUser?.role==='ADMIN';}
+function simulationActive_(){return !!(simulationState&&simulationState.personId);}
+function simulationCanEnableActions_(){return String(config.environment||'').toUpperCase()==='DEV';}
+const SIMULATION_READ_ACTIONS_CLIENT = new Set(['logout','status','getAppBootstrap','getHomeDashboard','getAccessProfile','getClubConfig','getSeasonContext','getSeasonsData','getStructureData','getTrainingExercisesData','previewTrainingExerciseImport','getTrainingSessionPlanData','getFamilyData','getDocumentsData','getDocumentFile','getCalendarData','getCalendarListData','getEventAvailabilityData','getPersonAvailabilityData','getCompetitionsData','analyzeCompetitionSource','previewLeagueCalendarImport','getMatchPlanningData','getMatchSectionState','getMatchReportReview','getMatchReportFile','getMatchReportMaintenanceData','getStatisticsData']);
+function simulationActionIsReadOnlyClient_(action){return SIMULATION_READ_ACTIONS_CLIENT.has(String(action||''));}
+function simulationRequest_(){return simulationActive_()?{personId:simulationState.personId,allowActions:!!simulationState.allowActions}:{personId:'',allowActions:false};}
+function simulationCandidateById_(personId){return (simulationCandidates||[]).find(x=>String(x.personId||'')===String(personId||''))||null;}
+function resetSimulationState_(){simulationState={personId:'',displayName:'',email:'',accessProfile:null,allowActions:false};}
+
 function shouldBlockUiForAction_(action){
   const a=String(action||'');
   return /^(login|logout|save|create|update|delete|set|upload|import|reprocess|apply|analyze|sync|process|copy|generate|review|reset|link|refreshMatchReportOfficialData)/i.test(a)
@@ -243,6 +255,9 @@ function shouldBlockUiForAction_(action){
 }
 
 async function call(action, payload = {}, fixedRequestId = null) {
+  if(simulationActive_()&&!simulationState.allowActions&&!simulationActionIsReadOnlyClient_(action)){
+    const error=new Error('Modo simulación en solo lectura. Volvé a Administrador o habilitá acciones de prueba en DEV.');error.code='SIMULATION_READ_ONLY';throw error;
+  }
   const blocking = shouldBlockUiForAction_(action);
   const busyToken = beginUiBusy_(busyMessageForAction_(action), blocking);
   try {
@@ -250,6 +265,7 @@ async function call(action, payload = {}, fixedRequestId = null) {
       action,
       payload,
       sessionToken,
+      simulation: (action==='login'||action==='logout')?{personId:'',allowActions:false}:simulationRequest_(),
       requestId: fixedRequestId || requestId(),
       clientVersion: config.appVersion
     });
@@ -283,6 +299,8 @@ function saveSession(data) {
 function clearSession() {
   sessionToken = '';
   currentUser = null;
+  simulationCandidates = [];
+  resetSimulationState_();
   clubConfig = null;
   seasonContext = null;
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
@@ -324,10 +342,10 @@ function brandMarkup() {
 function roleDisplayName(role) {
   return ({ADMIN:'Administrador',MEMBER:'Acceso por persona',MANAGER:'Manager',COACH:'Entrenador',REFEREE:'Árbitro',PLAYER:'Jugador',TUTOR:'Tutor',COORDINATOR:'Coordinador',COLLABORATOR:'Colaborador'})[role] || role || '';
 }
-function currentAccessProfile_(){return currentUser?.accessProfile||{capabilities:{},accessLabels:[],roleContexts:[]};}
+function currentAccessProfile_(){return simulationActive_()?(simulationState.accessProfile||{capabilities:{},accessLabels:[],roleContexts:[]}):(currentUser?.accessProfile||{capabilities:{},accessLabels:[],roleContexts:[]});}
 const ROLE_CONTEXT_STORAGE_PREFIX='gestionClub.roleContext.v1:';
 function roleContexts_(){return currentAccessProfile_().roleContexts||[];}
-function roleContextStorageKey_(){return ROLE_CONTEXT_STORAGE_PREFIX+String(currentUser?.personId||currentUser?.email||'anonymous');}
+function roleContextStorageKey_(){return ROLE_CONTEXT_STORAGE_PREFIX+String(simulationActive_()?simulationState.personId:(currentUser?.personId||currentUser?.email||'anonymous'));}
 function savedRoleContextId_(){try{return localStorage.getItem(roleContextStorageKey_())||'';}catch(_){return '';}}
 function currentRoleContext_(){
   const contexts=roleContexts_();if(!contexts.length)return {id:'PERSONAL',roleCategory:'PERSONAL',label:'Mi perfil',divisionIds:[],eventIds:[]};
@@ -369,7 +387,7 @@ function resetContextScopedUi_(){
 function currentAccessSummary_(){const ctx=currentRoleContext_();return ctx?.label||'Acceso personal';}
 async function refreshAccessProfileForSeason_(){
   if(!currentUser)return;
-  try{const {data}=await call('getAccessProfile',{seasonId:selectedSeasonId_()});currentUser.accessProfile=data||{};}catch(_){/* conserva perfil previo si la lectura falla */}
+  try{const {data}=await call('getAccessProfile',{seasonId:selectedSeasonId_()});if(simulationActive_())simulationState.accessProfile=data||{};else currentUser.accessProfile=data||{};}catch(_){/* conserva perfil previo si la lectura falla */}
 }
 function rerenderForContext_(active){
   if(active==='home')return renderDashboard();
@@ -381,6 +399,29 @@ function rerenderForContext_(active){
   if(active==='settings')return renderClubSettings();
   return renderDashboard();
 }
+
+function simulationSwitcherMarkup_(){
+  if(!realUserIsAdmin_())return '';
+  const current=simulationActive_()?simulationState.personId:'';
+  const options=(simulationCandidates||[]).map(x=>`<option value="${escapeHtml(x.personId)}" ${String(x.personId)===String(current)?'selected':''}>${escapeHtml(x.displayName||x.email)}${x.email?` · ${escapeHtml(x.email)}`:''}</option>`).join('');
+  return `<label class="simulation-switcher"><span>Vista</span><select id="global-simulation-person" aria-label="Vista de administrador o persona"><option value="">Administrador</option>${options}</select></label>`;
+}
+function simulationBannerMarkup_(){
+  if(!simulationActive_())return '';
+  const mode=simulationState.allowActions?'Acciones de prueba habilitadas':'Solo lectura';
+  const toggle=simulationCanEnableActions_()?`<label class="simulation-actions"><input id="simulation-allow-actions" type="checkbox" ${simulationState.allowActions?'checked':''}> Permitir acciones en DEV</label>`:'';
+  return `<div class="simulation-banner"><div><strong>Modo simulación</strong><span>Viendo como ${escapeHtml(simulationState.displayName||simulationState.email||'persona')} · <b id="simulation-mode-text">${escapeHtml(mode)}</b></span></div><div class="simulation-banner-actions">${toggle}<button class="button mini secondary" id="simulation-exit">Volver a Administrador</button></div></div>`;
+}
+async function activateSimulation_(personId){
+  const id=String(personId||'');
+  if(!id){resetSimulationState_();resetContextScopedUi_();showToast_('Vista Administrador restaurada.','success',1800);return renderDashboard();}
+  const candidate=simulationCandidateById_(id);
+  if(!candidate){showToast_('La persona seleccionada ya no está disponible para simular.','warning',3000);return;}
+  simulationState={personId:id,displayName:candidate.displayName||'',email:candidate.email||'',accessProfile:null,allowActions:false};
+  try{const {data}=await call('getAccessProfile',{seasonId:selectedSeasonId_()});simulationState.accessProfile=data||{};resetContextScopedUi_();showToast_('Simulando acceso de '+(candidate.displayName||candidate.email)+'.','success',2200);return renderDashboard();}
+  catch(err){resetSimulationState_();showToast_(userErrorText_(err),'error',4500);return renderDashboard();}
+}
+function simulationSessionSubtext_(){return simulationActive_()?'Administrador autenticado':currentAccessSummary_();}
 
 function seasonList_(){return seasonContext?.seasons||[];}
 function selectedSeasonId_(){
@@ -472,15 +513,20 @@ function shell(content, active = 'home') {
   root.innerHTML = `
     <header class="topbar">
       <div class="brand">${brandMarkup()}</div>
+      ${currentUser ? simulationSwitcherMarkup_() : ''}
       ${currentUser ? seasonSwitcherMarkup_() : ''}
       ${currentUser ? roleContextSwitcherMarkup_() : ''}
-      ${currentUser ? `<div class="session"><div class="session-copy"><span>${escapeHtml(currentUser.displayName||currentUser.email)}</span><small>${escapeHtml(currentAccessSummary_())}</small></div><button class="button ghost logout-button" id="logout">Salir</button></div>` : ''}
+      ${currentUser ? `<div class="session"><div class="session-copy"><span>${escapeHtml(currentUser.displayName||currentUser.email)}</span><small>${escapeHtml(simulationSessionSubtext_())}</small></div><button class="button ghost logout-button" id="logout">Salir</button></div>` : ''}
     </header>
     ${currentUser ? `<nav class="nav">${navMarkup(active)}</nav>` : ''}
+    ${currentUser ? simulationBannerMarkup_() : ''}
     <main class="container">${content}</main>
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')}${String(config.appVersion||'')!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:''} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
   if (logoutButton) logoutButton.onclick = logout;
+  const simulationSelect=document.getElementById('global-simulation-person');if(simulationSelect)simulationSelect.onchange=()=>activateSimulation_(simulationSelect.value);
+  const simulationExit=document.getElementById('simulation-exit');if(simulationExit)simulationExit.onclick=()=>activateSimulation_('');
+  const simulationActions=document.getElementById('simulation-allow-actions');if(simulationActions)simulationActions.onchange=()=>{simulationState.allowActions=!!simulationActions.checked;const modeText=document.getElementById('simulation-mode-text');if(modeText)modeText.textContent=simulationState.allowActions?'Acciones de prueba habilitadas':'Solo lectura';showToast_(simulationState.allowActions?'Acciones de prueba habilitadas. Quedarán auditadas con el administrador real.':'Simulación en solo lectura.','warning',3200);};
   const seasonSelect=document.getElementById('global-season-select');if(seasonSelect)seasonSelect.onchange=async()=>{resetSeasonScopedUi_(seasonSelect.value);await refreshAccessProfileForSeason_();resetContextScopedUi_();rerenderForSeason_(active);};
   const roleContextSelect=document.getElementById('global-role-context');if(roleContextSelect)roleContextSelect.onchange=()=>{saveRoleContextId_(roleContextSelect.value);resetContextScopedUi_();showToast_('Contexto cambiado a '+(currentRoleContext_().label||'la vista seleccionada')+'.','success',1800);rerenderForContext_(active);};
   document.querySelectorAll('[data-nav]').forEach(button => {

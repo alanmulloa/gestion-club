@@ -1,10 +1,10 @@
-const FRONTEND_BUILD = '0.6.66';
+const FRONTEND_BUILD = '0.6.67';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.66';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.67';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -574,54 +574,67 @@ function statusCard(title, state, detail) {
   return `<article class="status-card ${state ? 'ok' : 'pending'}"><span class="status-dot"></span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p></div></article>`;
 }
 
+function dashboardDateObj_(iso){const d=new Date(String(iso||'')+'T12:00:00Z');return Number.isNaN(d.getTime())?null:d;}
+function dashboardAddDaysClient_(iso,days){const d=dashboardDateObj_(iso);if(!d)return '';d.setUTCDate(d.getUTCDate()+Number(days||0));return d.toISOString().slice(0,10);}
+function dashboardDayLabel_(iso){const d=dashboardDateObj_(iso);if(!d)return iso||'';return new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'}).format(d).replace('.','');}
+function dashboardFullDateLabel_(iso){const d=dashboardDateObj_(iso);if(!d)return iso||'';return new Intl.DateTimeFormat('es-ES',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}).format(d);}
+function dashboardRoleCopy_(role){return ({PLAYER:'Tus entrenamientos, partidos y avisos personales.',COACH:'Planificación, asistencia y convocatorias de tu equipo.',MANAGER:'Operativa de la división, documentación, bajas y convocatorias.',COLLABORATOR:'Entrenamientos, asistencia y tareas deportivas de tu ámbito.',REFEREE:'Tus próximas asignaciones y actividades arbitrales.',COORDINATOR:'Visión transversal de entrenamientos, equipos, bajas y pendientes.',ADMIN:'Visión global del club y acciones que requieren seguimiento.'})[role]||'Tu actividad y pendientes de la semana.';}
+function dashboardEventTypeLabel_(type){return ({TRAINING:'Entrenamiento',MATCH:'Partido',ACTIVITY:'Actividad'})[String(type||'').toUpperCase()]||'Actividad';}
+function dashboardEventCompactHtml_(event){if(!event)return '<div class="empty-state">No hay próximos eventos en tu ámbito.</div>';const match=event.eventType==='MATCH',meta=[event.divisionName,event.teamName,event.location].filter(Boolean).join(' · ');return `<button class="dashboard-next-event" data-dashboard-event="${escapeHtml(event.eventId)}"><span class="dashboard-event-date">${escapeHtml(dashboardFullDateLabel_(event.eventDate))}${event.startTime?' · '+escapeHtml(event.startTime):''}</span><strong>${escapeHtml(match?(event.opponent?'Partido vs '+event.opponent:'Partido'):dashboardEventTypeLabel_(event.eventType))}</strong><small>${escapeHtml(meta||'Abrir actividad')}</small></button>`;}
+function dashboardWeekHtml_(data){const events=data.weekEvents||[],byDate={};events.forEach(e=>{(byDate[e.eventDate]||(byDate[e.eventDate]=[])).push(e);});let cols='';for(let i=0;i<7;i++){const date=dashboardAddDaysClient_(data.weekStart,i),items=(byDate[date]||[]).map(e=>`<button class="dashboard-week-event ${String(e.eventType||'').toLowerCase()}" data-dashboard-event="${escapeHtml(e.eventId)}"><span>${escapeHtml(e.startTime||'—')}</span><strong>${escapeHtml(e.eventType==='MATCH'?(e.opponent?'vs '+e.opponent:'Partido'):'Entrenamiento')}</strong><small>${escapeHtml(e.divisionName||e.teamName||'')}</small></button>`).join('');cols+=`<article class="dashboard-week-day ${date===data.today?'today':''}"><header><strong>${escapeHtml(dashboardDayLabel_(date))}</strong></header>${items||'<span class="dashboard-no-event">Sin eventos</span>'}</article>`;}return `<div class="dashboard-week-grid">${cols}</div>`;}
+function dashboardPriorityLabel_(priority){return ({HIGH:'Prioridad alta',MEDIUM:'Pendiente',LOW:'Aviso',INFO:'Información'})[priority]||'Pendiente';}
+function dashboardTaskActionLabel_(task){return ({'training-plan':'Planificar','training-attendance':'Confirmar asistencia','match-lineup':'Preparar convocatoria','match-summary':'Abrir partido','documents':'Revisar','calendar':'Ver calendario','event':'Abrir'})[task.action]||'Abrir';}
+function dashboardTasksHtml_(tasks){if(!tasks?.length)return '<div class="empty-state dashboard-empty"><strong>Todo al día.</strong><span>No hay acciones pendientes para este contexto.</span></div>';return `<div class="dashboard-task-list">${tasks.map(t=>`<article class="dashboard-task ${String(t.priority||'MEDIUM').toLowerCase()}"><div class="dashboard-task-copy"><span class="status-pill ${t.priority==='HIGH'?'danger':t.priority==='INFO'?'muted':'warning'}">${escapeHtml(dashboardPriorityLabel_(t.priority))}</span><strong>${escapeHtml(t.title)}</strong><p>${escapeHtml(t.detail||'')}</p></div><button class="button mini secondary" data-dashboard-task="${escapeHtml(t.action||'')}" data-event-id="${escapeHtml(t.eventId||'')}">${escapeHtml(dashboardTaskActionLabel_(t))}</button></article>`).join('')}</div>`;}
+function wireDashboardActions_(){document.querySelectorAll('[data-dashboard-event]').forEach(el=>el.onclick=()=>renderEventDetail(el.dataset.dashboardEvent));document.querySelectorAll('[data-dashboard-task]').forEach(el=>el.onclick=()=>{const action=el.dataset.dashboardTask,id=el.dataset.eventId;if(action==='training-plan')return renderEventDetail(id,'plan');if(action==='training-attendance')return renderEventDetail(id,'attendance');if(action==='match-lineup')return renderMatchPlanning(id,'convocados');if(action==='match-summary')return renderMatchPlanning(id,'summary');if(action==='event')return renderEventDetail(id);if(action==='documents')return renderDocuments();return renderCalendar();});}
+
 async function renderDashboard() {
   if (!clubConfig) await loadClubConfig();
   if (!seasonContext) await loadSeasonContext_();
-  const clubName = clubConfig?.officialName || 'Tu club todavía no está configurado';
-  const season = selectedSeason_()?.name || 'Sin temporada configurada';
+  const clubName=clubConfig?.officialName||'Gestión Club',season=selectedSeason_()?.name||'Sin temporada configurada',ctx=currentRoleContext_(),role=contextRoleCategory_();
   shell(`
-    <section class="hero role-hero">
-      <span class="eyebrow">${escapeHtml(currentRoleContext_().label||roleDisplayName(currentUser?.role))}</span>
-      <h1>${escapeHtml(clubName)}</h1>
-      <p>Temporada de trabajo: ${escapeHtml(season)}. Accesos rápidos adaptados a tu función.</p>
+    <section class="hero role-hero dashboard-hero">
+      <span class="eyebrow">${escapeHtml(ctx.label||roleDisplayName(currentUser?.role))}</span>
+      <h1>Mi semana</h1>
+      <p>${escapeHtml(dashboardRoleCopy_(role))} · ${escapeHtml(season)}</p>
     </section>
-    <section class="quick-grid role-quick-grid">${dashboardCardsForRole()}</section>
-    ${accessScopeOverviewHtml_()}
-    <section class="panel">
-      <div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend y almacenamiento.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div>
-      <div id="status-grid" class="status-grid">${statusCard('Autenticación', true, currentUser?.email || 'Sesión activa')}${statusCard('Backend', false, 'Comprobando…')}${statusCard('Google Sheets', false, 'Comprobando…')}${statusCard('Google Drive', false, 'Comprobando…')}${statusCard('Drive API v3', false, 'Comprobando…')}${statusCard('OCR PDF', false, 'Comprobando…')}</div>
+    <section class="dashboard-summary-grid">
+      <article class="panel dashboard-next-panel"><div class="section-heading"><div><span class="eyebrow">Próximo</span><h2>Próximo evento</h2></div></div><div id="dashboard-next"><div class="skeleton-block"></div></div></article>
+      <article class="panel dashboard-pending-panel"><div class="section-heading"><div><span class="eyebrow">Acciones</span><h2>Pendientes</h2></div><button class="button secondary mini" id="dashboard-refresh">Actualizar</button></div><div id="dashboard-task-summary" class="dashboard-task-summary"><span>Calculando…</span></div></article>
     </section>
+    <section class="panel dashboard-week-panel"><div class="section-heading"><div><h2>Calendario de la semana</h2><p>Eventos dentro del contexto ${escapeHtml(ctx.label||'actual')}.</p></div><button class="button secondary" id="dashboard-open-calendar">Abrir calendario</button></div><div id="dashboard-week"><div class="skeleton-block tall"></div></div></section>
+    <section class="panel"><div class="section-heading"><div><h2>Qué necesita tu atención</h2><p>Acciones detectadas automáticamente según tu rol y ámbito.</p></div></div><div id="dashboard-tasks"><div class="skeleton-block tall"></div></div></section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
-  const wire=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
-  wire('go-structure',()=>renderStructure());
-  wire('go-documents',renderDocuments);
-  wire('go-calendar',renderCalendar);
-  wire('go-exercises',renderTrainingExercises);
-  wire('go-statistics',renderStatistics);
-  wire('go-settings',renderClubSettings);
-  document.getElementById('refresh-status').onclick = loadStatus;
-  void loadStatus();
+  document.getElementById('dashboard-open-calendar').onclick=renderCalendar;
+  const load=async()=>{const refresh=document.getElementById('dashboard-refresh');if(refresh)refresh.disabled=true;try{const {data}=await call('getHomeDashboard',{seasonId:selectedSeasonId_(),roleCategory:role,divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''});const next=document.getElementById('dashboard-next'),week=document.getElementById('dashboard-week'),tasks=document.getElementById('dashboard-tasks'),summary=document.getElementById('dashboard-task-summary');if(next)next.innerHTML=dashboardEventCompactHtml_(data.nextEvent);if(week)week.innerHTML=dashboardWeekHtml_(data);if(tasks)tasks.innerHTML=dashboardTasksHtml_(data.tasks||[]);if(summary)summary.innerHTML=`<strong>${Number(data.taskCount||0)}</strong><span>${Number(data.taskCount||0)===1?'acción pendiente':'acciones / avisos pendientes'}</span>`;wireDashboardActions_();}catch(error){showMessage(error.message,'error');const tasks=document.getElementById('dashboard-tasks');if(tasks)tasks.innerHTML='<div class="message error">No se pudieron cargar los pendientes.</div>';}finally{if(refresh)refresh.disabled=false;}};
+  document.getElementById('dashboard-refresh').onclick=load;
+  void load();
 }
 
 async function loadStatus() {
   const button = document.getElementById('refresh-status');
   if (button) button.disabled = true;
+  const clientStarted=performance.now();
   try {
     const { data } = await call('status');
+    const roundTrip=Math.max(0,Math.round(performance.now()-clientStarted));
     currentUser = { email:data.actor.email, displayName:data.actor.displayName||'', role:data.actor.role, personId:data.actor.personId||'', accessProfile:currentUser?.accessProfile||data.actor.accessProfile||{} };
+    const versionMatch=String(data.backend?.version||'')===String(FRONTEND_BUILD||'');
     const grid = document.getElementById('status-grid');
     if (grid) grid.innerHTML = [
-      statusCard('Autenticación', data.authenticated, `${data.actor.email} · ${data.actor.role}`),
-      statusCard('Backend', data.backend.ok, `v${data.backend.version} · ${data.backend.environment}`),
-      statusCard('Google Sheets', data.sheets.ok, `${data.sheets.spreadsheetName} · ${data.sheets.requiredSheets} hojas`),
-      statusCard('Google Drive', data.drive.ok, data.drive.rootFolderName),
-      statusCard('Drive API v3', !!data.ocr?.ok, data.ocr?.ok ? `${data.ocr.apiVersion} · ${data.ocr.method}` : (data.ocr?.detail || 'No disponible')),
-      statusCard('OCR PDF', !!data.ocr?.ocrPdfReady, data.ocr?.ocrPdfReady ? 'Preparado · idioma español' : 'No disponible')
+      statusCard('Autenticación', data.authenticated, `${data.actor.email} · ${currentAccessSummary_()}`),
+      statusCard('Backend', data.backend.ok, `v${data.backend.version} · ${data.backend.environment} · ${data.backend.responseMs||data.totalResponseMs||0} ms`),
+      statusCard('Frontend', versionMatch, `v${FRONTEND_BUILD}${versionMatch?' · sincronizado':' · no coincide con backend'}`),
+      statusCard('Google Sheets', data.sheets.ok, `${data.sheets.spreadsheetName} · ${data.sheets.requiredSheets} hojas · ${data.sheets.responseMs||0} ms`),
+      statusCard('Google Drive', data.drive.ok, `${data.drive.rootFolderName} · ${data.drive.responseMs||0} ms`),
+      statusCard('Drive API v3', !!data.ocr?.ok, data.ocr?.ok ? `${data.ocr.apiVersion} · ${data.ocr.method} · ${data.ocr.responseMs||0} ms` : (data.ocr?.detail || 'No disponible')),
+      statusCard('OCR PDF', !!data.ocr?.ocrPdfReady, data.ocr?.ocrPdfReady ? 'Preparado · idioma español' : 'No disponible'),
+      statusCard('Respuesta completa', roundTrip<5000, `${roundTrip} ms · comprobado ${formatAppDateTime_(data.checkedAt||new Date().toISOString())}`)
     ].join('');
-    showMessage('Sistema disponible.', 'success');
+    const summary=document.getElementById('system-status-summary');if(summary){summary.className=`system-status-summary ${versionMatch?'ok':'warning'}`;summary.innerHTML=`<strong>${versionMatch?'Sistema disponible':'Advertencia de versión'}</strong><span>${versionMatch?'Frontend y backend están sincronizados.':`Frontend ${escapeHtml(FRONTEND_BUILD)} / Backend ${escapeHtml(data.backend?.version||'—')}`}</span>`;}
+    showMessage(versionMatch?'Sistema disponible.':'El sistema responde, pero frontend y backend no coinciden.', versionMatch?'success':'warning','system-message');
   } catch (error) {
     if (!sessionToken) return renderLogin();
-    showMessage(`${error.message}${error.requestId ? ` · Solicitud ${error.requestId}` : ''}`, 'error');
+    showMessage(`${error.message}${error.requestId ? ` · Solicitud ${error.requestId}` : ''}`, 'error','system-message');
   } finally {
     if (button) button.disabled = false;
   }
@@ -678,7 +691,7 @@ async function renderClubSettings(section=settingsSection) {
   }else if(settingsSection==='imports'){
     content=`<section class="panel settings-section-panel"><div class="section-heading"><h2>Importaciones</h2><p>Cargas masivas controladas para mantener la información del club.</p></div><div class="settings-action-cards"><article><span class="eyebrow">Entrenamiento</span><h3>Biblioteca de ejercicios</h3><p>Importá archivos XLSX con vista previa y detección de duplicados por nombre + categoría.</p><div class="button-row"><button class="button primary" id="settings-import-exercises">Importar ejercicios</button><button class="button secondary" id="settings-open-exercises">Abrir biblioteca</button></div></article><article class="muted-card"><span class="eyebrow">Próximamente</span><h3>Más importaciones</h3><p>Este mismo patrón podrá reutilizarse para plantillas u otros catálogos sin editar Google Sheets manualmente.</p></article></div><div id="settings-import-host"></div></section>`;
   }else{
-    content=`<section class="panel settings-section-panel"><div class="section-heading"><h2>Sistema</h2><p>Información técnica de solo lectura para comprobar la instalación.</p></div><div class="settings-system-grid"><article><span>Versión</span><strong>${escapeHtml(config.appVersion||FRONTEND_BUILD)}</strong></article><article><span>Entorno</span><strong>${escapeHtml(config.environment||'—')}</strong></article><article><span>Frontend</span><strong>${escapeHtml(FRONTEND_BUILD)}</strong></article><article><span>Zona horaria</span><strong>${escapeHtml(APP_TIMEZONE)}</strong></article><article><span>Autenticación</span><strong>${escapeHtml(config.authMode||'SHEETS_PASSWORD')}</strong></article><article><span>Temporada activa</span><strong>${escapeHtml(s.activeSeason?.name||'Sin configurar')}</strong></article></div><div class="info-strip">Las operaciones de inicialización destructiva no se exponen desde esta pantalla.</div></section>`;
+    content=`<section class="panel settings-section-panel system-panel"><div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend, almacenamiento, OCR y sincronización del frontend.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div><div id="system-status-summary" class="system-status-summary"><strong>Comprobando…</strong><span>Validando servicios de Gestión Club.</span></div><div id="status-grid" class="status-grid system-status-grid">${statusCard('Autenticación',true,currentUser?.email||'Sesión activa')}${statusCard('Backend',false,'Comprobando…')}${statusCard('Frontend',true,`v${FRONTEND_BUILD}`)}${statusCard('Google Sheets',false,'Comprobando…')}${statusCard('Google Drive',false,'Comprobando…')}${statusCard('Drive API v3',false,'Comprobando…')}${statusCard('OCR PDF',false,'Comprobando…')}${statusCard('Respuesta completa',false,'Midiendo…')}</div><div id="system-message" class="message"></div><div class="settings-system-grid compact"><article><span>Entorno</span><strong>${escapeHtml(config.environment||'—')}</strong></article><article><span>Zona horaria</span><strong>${escapeHtml(APP_TIMEZONE)}</strong></article><article><span>Autenticación</span><strong>${escapeHtml(config.authMode||'SHEETS_PASSWORD')}</strong></article><article><span>Temporada activa</span><strong>${escapeHtml(s.activeSeason?.name||'Sin configurar')}</strong></article></div><div class="info-strip">Las operaciones de inicialización destructiva no se exponen desde esta pantalla.</div></section>`;
   }
   shell(`<section class="hero compact"><span class="eyebrow">Administración</span><h1>Configuración</h1><p>Identidad, datos generales, importaciones y estado del sistema en una única sección.</p></section>${tabsHtml}${content}`,'settings');
   wireSettingsTabs_();
@@ -697,6 +710,10 @@ async function renderClubSettings(section=settingsSection) {
   if(settingsSection==='imports'){
     document.getElementById('settings-open-exercises')?.addEventListener('click',renderTrainingExercises);
     document.getElementById('settings-import-exercises')?.addEventListener('click',()=>openTrainingExerciseImport_('settings-import-host',()=>renderClubSettings('imports')));
+  }
+  if(settingsSection==='system'){
+    document.getElementById('refresh-status')?.addEventListener('click',loadStatus);
+    void loadStatus();
   }
 }
 

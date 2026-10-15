@@ -1,10 +1,10 @@
-const FRONTEND_BUILD = '0.6.70';
+const FRONTEND_BUILD = '0.6.71';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.70';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.71';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let simulationCandidates = [];
@@ -363,9 +363,14 @@ function contextScopedDivisionId_(stored){
   return ids.length===1?ids[0]:'';
 }
 function contextAllowsDivisionId_(divisionId){const ids=contextDivisionIds_();return !ids.length||ids.includes(String(divisionId||''));}
+function isExternalRefereeMatchClient_(event){return String(event?.eventType||'').toUpperCase()==='MATCH'&&String(event?.matchType||'').toUpperCase()==='REFEREE_EXTERNAL';}
 function contextAllowsEvent_(event){
-  const ctx=currentRoleContext_();
-  if(ctx.roleCategory==='REFEREE'){const ids=contextEventIds_();return ids.includes(String(event?.eventId||''));}
+  const ctx=currentRoleContext_(),role=String(ctx.roleCategory||'').toUpperCase();
+  if(isExternalRefereeMatchClient_(event)){
+    if(role==='REFEREE'){const ids=contextEventIds_();return ids.includes(String(event?.eventId||''));}
+    return role==='REFEREE_COORDINATOR'||role==='ADMIN';
+  }
+  if(role==='REFEREE'){const ids=contextEventIds_();return ids.includes(String(event?.eventId||''));}
   const divs=contextDivisionIds_();return !divs.length||divs.includes(String(event?.divisionId||''));
 }
 function roleContextSwitcherMarkup_(){
@@ -1551,7 +1556,7 @@ function competitionLinkButtons_(competition,event=null){
   if(event?.officialReportUrl)links.push(externalLinkButton_(event.officialReportUrl,'Acta oficial','primary'));
   return links.filter(Boolean).join('');
 }
-function calendarEventLine(e){const time=displayEventTime_(e),tm=time?` · ${escapeHtml(time)}`:'';const opp=e.eventType==='MATCH'&&e.opponent?` · vs ${escapeHtml(e.opponent)}`:'';return `<button class="calendar-event ${eventVisualClass_(e)} ${teamPatternClass_(e)} status-${String(e.status||'').toLowerCase()}" style="${divisionEventStyle_(e)}" data-open-event="${e.eventId}"><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${tm}${opp}</small></button>`;}
+function calendarEventLine(e){const time=displayEventTime_(e),tm=time?` · ${escapeHtml(time)}`:'',opp=e.eventType==='MATCH'&&e.opponent?` · vs ${escapeHtml(e.opponent)}`:'',ref=isExternalRefereeMatchClient_(e)?' · Árbitro FAR':'';return `<button class="calendar-event ${eventVisualClass_(e)} ${teamPatternClass_(e)} status-${String(e.status||'').toLowerCase()}" style="${divisionEventStyle_(e)}" data-open-event="${e.eventId}"><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${tm}${opp}${ref}</small></button>`;}
 
 function renderMonthGrid(events){
   const y=calendarCursor.getFullYear(),m=calendarCursor.getMonth(); const first=new Date(y,m,1), last=new Date(y,m+1,0); let start=(first.getDay()+6)%7;
@@ -1662,9 +1667,20 @@ async function renderStatistics(filters={}){
 async function renderRefereeCoordination_(){
   try{
     const {data}=await call('getRefereeCoordinationData',{seasonId:selectedSeasonId_()});
-    const rows=data.rows||[];
-    shell(`<section class="hero compact"><span class="eyebrow">Área arbitral</span><h1>Designaciones internas</h1><p>Entrenamientos y amistosos. Los partidos oficiales siguen gestionándose desde FAR/MatchReady.</p></section><section class="panel"><div class="panel-heading"><div><h2>Próximas actividades</h2><p>${rows.length} actividad(es) con designación interna.</p></div><button class="button secondary" id="referee-coordination-back">Volver al calendario</button></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Actividad</th><th>Árbitro</th><th>Estado</th><th></th></tr></thead><tbody>${rows.map(r=>{const e=r.event||{},selected=r.refereePersonId||'';const options=(r.candidates||[]).map(c=>`<option value="${escapeHtml(c.personId)}" ${selected===c.personId?'selected':''} ${(!c.available||c.hardConflict)&&selected!==c.personId?'disabled':''}>${escapeHtml(c.displayName)}${!c.available?' · AUSENTE':c.hardConflict?' · CONFLICTO':''}</option>`).join('');const current=(r.candidates||[]).find(c=>c.personId===selected);const warns=current?.conflicts?.filter(c=>c.level==='WARN')||[];return `<tr><td>${escapeHtml(e.eventDate||'—')}<small>${escapeHtml(displayEventTime_(e))}</small></td><td><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${escapeHtml(e.eventType==='MATCH'?'Amistoso / manual':'Entrenamiento')}</small></td><td><select data-referee-select="${escapeHtml(e.eventId)}"><option value="">— Sin designar —</option>${options}</select>${warns.length?`<small class="warning-text">⚠ ${escapeHtml(warns.map(x=>x.reason).join(' · '))}</small>`:''}</td><td>${selected?'<span class="status-pill success">Designado</span>':'<span class="status-pill warning">Pendiente</span>'}</td><td><button class="button mini primary" data-save-referee="${escapeHtml(e.eventId)}">Guardar</button></td></tr>`;}).join('')}</tbody></table></div>`:'<div class="empty-state">No hay actividades internas pendientes de designación.</div>'}<div id="message" class="message"></div></section>`,'calendar');
+    const rows=data.rows||[],farCount=rows.filter(r=>r.readOnly).length,clubCount=rows.length-farCount;
+    const rowHtml=rows.map(r=>{
+      const e=r.event||{},selected=r.refereePersonId||'';
+      if(r.readOnly){
+        const external=isExternalRefereeMatchClient_(e),kind=external?'Partido externo · FAR':'Partido oficial · FAR';
+        return `<tr><td>${escapeHtml(e.eventDate||'—')}<small>${escapeHtml(displayEventTime_(e))}</small></td><td><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${escapeHtml(kind)}</small></td><td><strong>${escapeHtml(r.refereeName||'—')}</strong></td><td><span class="status-pill active">FAR</span></td><td><button class="button mini secondary" data-open-referee-event="${escapeHtml(e.eventId)}">Ver</button></td></tr>`;
+      }
+      const options=(r.candidates||[]).map(c=>`<option value="${escapeHtml(c.personId)}" ${selected===c.personId?'selected':''} ${(!c.available||c.hardConflict)&&selected!==c.personId?'disabled':''}>${escapeHtml(c.displayName)}${!c.available?' · AUSENTE':c.hardConflict?' · CONFLICTO':''}</option>`).join('');
+      const current=(r.candidates||[]).find(c=>c.personId===selected),warns=current?.conflicts?.filter(c=>c.level==='WARN')||[];
+      return `<tr><td>${escapeHtml(e.eventDate||'—')}<small>${escapeHtml(displayEventTime_(e))}</small></td><td><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${escapeHtml(e.eventType==='MATCH'?'Amistoso / manual':'Entrenamiento')}</small></td><td><select data-referee-select="${escapeHtml(e.eventId)}"><option value="">— Sin designar —</option>${options}</select>${warns.length?`<small class="warning-text">⚠ ${escapeHtml(warns.map(x=>x.reason).join(' · '))}</small>`:''}</td><td>${selected?'<span class="status-pill success">Club</span>':'<span class="status-pill warning">Pendiente</span>'}</td><td><button class="button mini primary" data-save-referee="${escapeHtml(e.eventId)}">Guardar</button></td></tr>`;
+    }).join('');
+    shell(`<section class="hero compact"><span class="eyebrow">Área arbitral</span><h1>Coordinación de árbitros</h1><p>Designaciones FAR y asignaciones internas del club en una única vista.</p></section><section class="panel"><div class="panel-heading"><div><h2>Próximas designaciones</h2><p>${rows.length} actividad(es) · ${farCount} FAR · ${clubCount} internas.</p></div><button class="button secondary" id="referee-coordination-back">Volver al calendario</button></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Actividad</th><th>Árbitro</th><th>Origen</th><th></th></tr></thead><tbody>${rowHtml}</tbody></table></div>`:'<div class="empty-state">No hay designaciones próximas.</div>'}<div id="message" class="message"></div></section>`,'calendar');
     document.getElementById('referee-coordination-back').onclick=renderCalendar;
+    document.querySelectorAll('[data-open-referee-event]').forEach(b=>b.onclick=()=>renderEventDetail(b.dataset.openRefereeEvent));
     document.querySelectorAll('[data-save-referee]').forEach(b=>b.onclick=async()=>{const eventId=b.dataset.saveReferee,sel=document.querySelector(`[data-referee-select="${CSS.escape(eventId)}"]`);b.disabled=true;try{await call('assignEventReferee',{eventId,personId:sel?.value||''});showToast_('Designación actualizada.');await renderRefereeCoordination_();}catch(err){showMessage(err.message,'error');b.disabled=false;}});
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar las designaciones</h1><p>${escapeHtml(err.message)}</p><button class="button secondary" id="referee-coordination-back">Volver</button></section>`,'calendar');document.getElementById('referee-coordination-back')?.addEventListener('click',renderCalendar);}
 }
@@ -1926,12 +1942,18 @@ function eventAvailabilityStaffRoleTextClient_(person){
   return cats.map(eventAvailabilityRoleLabelClient_).join(' · ')||eventAvailabilityRoleLabelClient_(person?.availabilityRoleCategory);
 }
 function availabilityRestrictionText_(effect,eventType){
-  if(!effect||effect.state==='NORMAL')return 'Sin restricciones';
+  if(!effect)return 'Sin restricciones';
   const first=(effect.periods||[])[0],reason=effect.summary|| (first?(availabilityPeriodTypeLabelClient_(first.periodType)+(first.reason?' · '+first.reason:'')):'');
-  if(eventType==='MATCH')return `No seleccionable${reason?' · '+reason:''}`;
+  if(effect.blocked){
+    if(eventType==='MATCH')return `No seleccionable${reason?' · '+reason:''}`;
+    if(effect.state==='ADAPTED')return `Entrenamiento adaptado${reason?' · '+reason:''}`;
+    if(effect.state==='REHAB')return `Rehabilitación / recuperación${reason?' · '+reason:''}`;
+    return `No participa${reason?' · '+reason:''}`;
+  }
   if(effect.state==='ADAPTED')return `Entrenamiento adaptado${reason?' · '+reason:''}`;
   if(effect.state==='REHAB')return `Rehabilitación / recuperación${reason?' · '+reason:''}`;
-  return `No participa${reason?' · '+reason:''}`;
+  if(effect.possibleAbsence)return effect.scheduleConflictSummary||'Posible ausencia · designación arbitral FAR';
+  return 'Sin restricciones';
 }
 function availabilitySurnameSortKey_(person){
   const p=person||{},last=String(p.lastName||'').trim(),display=String(p.displayName||'').trim();
@@ -1950,11 +1972,12 @@ function eventAvailabilityPreviewHtml_(data,event){
   const available=players.filter(p=>{const eff=effects[p.personId]||{};return !availabilityIsSportsLeave_(eff)&&!eff.blocked;});
   const absences=players.filter(p=>{const eff=effects[p.personId]||{};return !availabilityIsSportsLeave_(eff)&&!!eff.blocked;});
   const injured=players.filter(p=>availabilityIsSportsLeave_(effects[p.personId]||{}));
+  const possible=candidates.filter(p=>!!effects[p.personId]?.possibleAbsence);
   const nameList=(rows,empty)=>rows.length?`<ul class="availability-preview-list">${rows.map(p=>`<li>${escapeHtml(p.displayName||p.personId)}</li>`).join('')}</ul>`:`<p class="muted compact-copy">${escapeHtml(empty)}</p>`;
-  const staffList=staff.length?`<ul class="availability-preview-list staff">${staff.map(p=>{const eff=effects[p.personId]||{};return `<li><span>${escapeHtml(p.displayName||p.personId)}</span><small>${escapeHtml(eventAvailabilityStaffRoleTextClient_(p))} · ${eff.blocked?'Ausente':'Disponible'}</small></li>`;}).join('')}</ul>`:'<p class="muted compact-copy">Sin staff en el alcance.</p>';
-  const refereeList=referees.length?`<div class="availability-preview-referee"><h4>Árbitro</h4><ul class="availability-preview-list staff">${referees.map(p=>{const eff=effects[p.personId]||{};return `<li><span>${escapeHtml(p.displayName||p.personId)}</span><small>${eff.blocked?'Ausente':'Disponible'}</small></li>`;}).join('')}</ul></div>`:'';
+  const staffList=staff.length?`<ul class="availability-preview-list staff">${staff.map(p=>{const eff=effects[p.personId]||{};return `<li><span>${escapeHtml(p.displayName||p.personId)}</span><small>${escapeHtml(eventAvailabilityStaffRoleTextClient_(p))} · ${eff.blocked?'Ausente':eff.possibleAbsence?'⚠ Posible ausencia':'Disponible'}</small></li>`;}).join('')}</ul>`:'<p class="muted compact-copy">Sin staff en el alcance.</p>';
+  const refereeList=referees.length?`<div class="availability-preview-referee"><h4>Árbitro</h4><ul class="availability-preview-list staff">${referees.map(p=>{const eff=effects[p.personId]||{};return `<li><span>${escapeHtml(p.displayName||p.personId)}</span><small>${eff.blocked?'Ausente':eff.possibleAbsence?'⚠ Posible ausencia':'Disponible'}</small></li>`;}).join('')}</ul></div>`:'';
   const open=!!data.isOpenForAvailability;
-  return `<section class="availability-preview"><div class="panel-heading"><div><span class="eyebrow">Antes de la actividad</span><h2>Disponibilidad previa</h2><p>${open?'Se calcula automáticamente. Si necesitás cambiar una baja o ausencia, entrá en Gestionar disponibilidad.':'Foto congelada al comenzar la actividad. Desde este momento los cambios se registran en asistencia/participación real.'}</p></div><span class="status-pill ${open?'active':''}">${open?'Editable':'Cerrada'}</span></div><div class="attendance-summary"><span><strong>${players.length}</strong> jugadores</span><span><strong>${available.length}</strong> disponibles</span><span><strong>${absences.length}</strong> ausencias</span><span><strong>${injured.length}</strong> bajas</span></div><div class="availability-preview-grid"><div><h3>Disponibles</h3>${nameList(available,'Sin jugadores disponibles.')}</div><div><h3>Ausencias</h3>${nameList(absences,'Sin ausencias.')}</div><div><h3>Bajas / lesionados</h3>${nameList(injured,'Sin bajas activas.')}</div><div><h3>Staff</h3>${staffList}${refereeList}</div></div></section>`;
+  return `<section class="availability-preview"><div class="panel-heading"><div><span class="eyebrow">Antes de la actividad</span><h2>Disponibilidad previa</h2><p>${open?'Se calcula automáticamente. Si necesitás cambiar una baja o ausencia, entrá en Gestionar disponibilidad.':'Foto congelada al comenzar la actividad. Desde este momento los cambios se registran en asistencia/participación real.'}</p></div><span class="status-pill ${open?'active':''}">${open?'Editable':'Cerrada'}</span></div><div class="attendance-summary"><span><strong>${players.length}</strong> jugadores</span><span><strong>${available.length}</strong> disponibles</span><span><strong>${absences.length}</strong> ausencias</span><span><strong>${injured.length}</strong> bajas</span><span><strong>${possible.length}</strong> posibles conflictos FAR</span></div><div class="availability-preview-grid"><div><h3>Disponibles</h3>${nameList(available,'Sin jugadores disponibles.')}</div><div><h3>Ausencias</h3>${nameList(absences,'Sin ausencias.')}</div><div><h3>Bajas / lesionados</h3>${nameList(injured,'Sin bajas activas.')}</div><div><h3>Staff</h3>${staffList}${refereeList}</div></div></section>`;
 }
 function clockToMinutes_(value){const m=/^(\d{2}):(\d{2})$/.exec(String(value||''));return m?Number(m[1])*60+Number(m[2]):null;}
 function minutesToClock_(value){if(value===null||value===undefined||Number.isNaN(Number(value)))return '';const v=((Number(value)%1440)+1440)%1440;return `${String(Math.floor(v/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`;}
@@ -2003,10 +2026,11 @@ async function renderEventAvailability(eventId){
     const availablePlayers=availabilitySortPeople_(players.filter(p=>{const eff=data.effects?.[p.personId]||{};return !availabilityIsSportsLeave_(eff)&&!eff.blocked;}));
     const absentPlayers=availabilitySortPeople_(players.filter(p=>{const eff=data.effects?.[p.personId]||{};return !availabilityIsSportsLeave_(eff)&&!!eff.blocked;}));
     const injuredPlayers=availabilitySortPeople_(players.filter(p=>availabilityIsSportsLeave_(data.effects?.[p.personId]||{})));
+    const possibleConflictPeople=availabilitySortPeople_(candidates.filter(p=>!!data.effects?.[p.personId]?.possibleAbsence));
     const activeSportsLeave=eff=>(eff?.periods||[]).find(x=>String(x.periodType||'').toUpperCase()==='SPORTS_LEAVE'&&x.availabilityPeriodId);
-    const playerRow=p=>{const eff=data.effects?.[p.personId]||{state:'NORMAL',blocked:false},blocked=!!eff.blocked,leave=activeSportsLeave(eff);
-      const stateLabel=e.eventType==='MATCH'?(blocked?'No seleccionable':'Disponible'):(eff.state==='ADAPTED'?'Adaptado':eff.state==='REHAB'?'Rehabilitación':blocked?'No participa':'Disponible');
-      const stateClass=blocked?'danger':(eff.state==='ADAPTED'||eff.state==='REHAB'?'warning':'active');
+    const playerRow=p=>{const eff=data.effects?.[p.personId]||{state:'NORMAL',blocked:false},blocked=!!eff.blocked,possible=!!eff.possibleAbsence,leave=activeSportsLeave(eff);
+      const stateLabel=blocked?(e.eventType==='MATCH'?'No seleccionable':'No participa'):(eff.state==='ADAPTED'?'Adaptado':eff.state==='REHAB'?'Rehabilitación':possible?'Posible ausencia':'Disponible');
+      const stateClass=blocked?'danger':(eff.state==='ADAPTED'||eff.state==='REHAB'||possible?'warning':'active');
       let action='—';
       if(data.canEditAvailability){
         if(leave)action=`<div class="inline-actions"><button class="button mini secondary" data-edit-leave="${escapeHtml(p.personId)}" data-period-id="${escapeHtml(leave.availabilityPeriodId)}">Ver / editar baja</button><button class="button mini secondary" data-end-leave="${escapeHtml(leave.availabilityPeriodId)}" data-person-id="${escapeHtml(p.personId)}">Dar alta</button><button class="button mini secondary" data-new-event-absence="${escapeHtml(p.personId)}">Registrar ausencia</button></div>`;
@@ -2015,17 +2039,18 @@ async function renderEventAvailability(eventId){
       return `<tr class="${blocked?'availability-blocked-row':''}"><td><strong>${escapeHtml(p.displayName||p.personId)}</strong></td><td><span class="status-pill ${stateClass}">${escapeHtml(stateLabel)}</span></td><td><small>${escapeHtml(availabilityRestrictionText_(eff,e.eventType))}</small></td><td>${action}</td></tr>`;
     };
     const playerSection=(title,subtitle,rows,kind)=>`<section class="availability-group ${kind||''}"><div class="section-heading compact"><div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(subtitle)}</p></div><span class="badge">${rows.length}</span></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Estado</th><th>Motivo / modalidad</th><th></th></tr></thead><tbody>${rows.map(playerRow).join('')}</tbody></table></div>`:emptyTable('Sin personas en esta sección.')}</section>`;
-    const staffRows=(rows,isReferee=false)=>rows.map(p=>{const eff=data.effects?.[p.personId]||{blocked:false},punctual=!!eff.eventStaffAbsent,blocked=!!eff.blocked,role=eventAvailabilityStaffRoleTextClient_(p);
+    const staffRows=(rows,isReferee=false)=>rows.map(p=>{const eff=data.effects?.[p.personId]||{blocked:false},punctual=!!eff.eventStaffAbsent,blocked=!!eff.blocked,possible=!!eff.possibleAbsence,role=eventAvailabilityStaffRoleTextClient_(p);
       let action='—';if(data.canEditAvailability){if(punctual)action=`<button class="button mini secondary" data-staff-absence="${escapeHtml(p.personId)}" data-absent="false">Quitar ausencia</button>`;else if(!blocked)action=`<button class="button mini secondary" data-staff-absence="${escapeHtml(p.personId)}" data-absent="true">Marcar ausencia</button>`;else action='<small>Ausencia registrada</small>';}
-      return `<tr class="${blocked?'availability-blocked-row':''}"><td><strong>${escapeHtml(p.displayName||p.personId)}</strong></td>${isReferee?'':`<td>${escapeHtml(role)}</td>`}<td>${blocked?'<span class="status-pill danger">Ausente</span>':'<span class="status-pill success">Disponible</span>'}</td><td><small>${blocked?escapeHtml(availabilityRestrictionText_(eff,e.eventType)):'Disponible por defecto'}</small></td><td>${action}</td></tr>`;
+      const status=blocked?'<span class="status-pill danger">Ausente</span>':possible?'<span class="status-pill warning">Posible ausencia</span>':'<span class="status-pill success">Disponible</span>';
+      return `<tr class="${blocked?'availability-blocked-row':''}"><td><strong>${escapeHtml(p.displayName||p.personId)}</strong></td>${isReferee?'':`<td>${escapeHtml(role)}</td>`}<td>${status}</td><td><small>${possible||blocked?escapeHtml(availabilityRestrictionText_(eff,e.eventType)):'Disponible por defecto'}</small></td><td>${action}</td></tr>`;
     }).join('');
     const staffSection=staff.length?`<section class="availability-group staff-group"><div class="section-heading compact"><div><h3>Staff</h3><p>Cada persona aparece una sola vez aunque tenga varios cargos. Disponibles por defecto; solo se marca la ausencia para esta actividad.</p></div><span class="badge">${staff.length}</span></div><div class="table-wrap"><table><thead><tr><th>Persona</th><th>Rol</th><th>Estado</th><th>Detalle</th><th></th></tr></thead><tbody>${staffRows(staff,false)}</tbody></table></div></section>`:'';
     const refereeSection=referees.length?`<section class="availability-group staff-group"><div class="section-heading compact"><div><h3>Árbitro</h3><p>Solo para entrenamientos y partidos amistosos/actividades manuales. En liga oficial la designación viene de FAR.</p></div><span class="badge">${referees.length}</span></div><div class="table-wrap"><table><thead><tr><th>Persona</th><th>Estado</th><th>Detalle</th><th></th></tr></thead><tbody>${staffRows(referees,true)}</tbody></table></div></section>`:'';
     const header=e.eventType==='MATCH'?matchHeaderHtml_(e,(calendarData?.leagueMeta||[]).find(m=>m.eventId===e.eventId)||null,{compact:true}):activityHeaderHtml_(e,null);
     const open=!!data.isOpenForAvailability;
-    const modeText=open?'Jugadores activos disponibles por defecto. Las bajas y ausencias los excluyen automáticamente; las bajas deportivas se muestran al final. Para el staff solo se marca la ausencia puntual.':'La actividad ya comenzó. La disponibilidad previa está congelada y se muestra solo como histórico; cualquier diferencia real se registra en asistencia o participación.';
+    const modeText=open?'Jugadores activos disponibles por defecto. Las bajas y ausencias los excluyen automáticamente; una designación arbitral FAR se muestra como posible ausencia hasta que se confirme. Para el staff solo se marca la ausencia puntual.':'La actividad ya comenzó. La disponibilidad previa está congelada y se muestra solo como histórico; cualquier diferencia real se registra en asistencia o participación.';
     const tabs=['MATCH','TRAINING'].includes(e.eventType)?eventWorkspaceTabsHtml_(e,'availability',{summaryExists:!!matchTabState?.summaryExists,attendanceExists:e.eventType==='TRAINING'&&['IN_PROGRESS','COMPLETED'].includes(e.status),officialLinks:e.eventType==='MATCH'&&!!currentAccessProfile_().capabilities?.manageCompetitions}):'';
-    shell(`${header}<section class="panel">${tabs}<div class="panel-heading"><div><h2>${open?'Disponibilidad':'Disponibilidad previa'}</h2><p>${escapeHtml(modeText)}</p></div>${open?'<span class="status-pill active">Abierta</span>':'<span class="status-pill">Cerrada</span>'}</div><div class="attendance-summary"><span><strong>${players.length}</strong> jugadores</span><span><strong>${availablePlayers.length}</strong> disponibles</span><span><strong>${absentPlayers.length}</strong> ausencias</span><span><strong>${injuredPlayers.length}</strong> lesionados / baja</span></div>${playerSection('Jugadores disponibles','Ordenados por apellido de A a Z.',availablePlayers,'available')}${absentPlayers.length?playerSection('Ausencias','Ausencias vigentes para esta actividad.',absentPlayers,'absent'):''}${injuredPlayers.length?playerSection('Lesionados / baja deportiva','Se muestran al final. La baja puede editarse o finalizarse antes de la fecha prevista; además puede coexistir con una ausencia.',injuredPlayers,'injured'):''}<div class="section-divider"></div>${staffSection||emptyTable('No hay staff en el alcance de esta actividad.')}${refereeSection}<div id="editor-host"></div><div class="button-row"><button class="button secondary" id="availability-back">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar');
+    shell(`${header}<section class="panel">${tabs}<div class="panel-heading"><div><h2>${open?'Disponibilidad':'Disponibilidad previa'}</h2><p>${escapeHtml(modeText)}</p></div>${open?'<span class="status-pill active">Abierta</span>':'<span class="status-pill">Cerrada</span>'}</div><div class="attendance-summary"><span><strong>${players.length}</strong> jugadores</span><span><strong>${availablePlayers.length}</strong> disponibles</span><span><strong>${absentPlayers.length}</strong> ausencias</span><span><strong>${injuredPlayers.length}</strong> lesionados / baja</span><span><strong>${possibleConflictPeople.length}</strong> posibles conflictos FAR</span></div>${playerSection('Jugadores disponibles','Ordenados por apellido de A a Z.',availablePlayers,'available')}${absentPlayers.length?playerSection('Ausencias','Ausencias vigentes para esta actividad.',absentPlayers,'absent'):''}${injuredPlayers.length?playerSection('Lesionados / baja deportiva','Se muestran al final. La baja puede editarse o finalizarse antes de la fecha prevista; además puede coexistir con una ausencia.',injuredPlayers,'injured'):''}<div class="section-divider"></div>${staffSection||emptyTable('No hay staff en el alcance de esta actividad.')}${refereeSection}<div id="editor-host"></div><div class="button-row"><button class="button secondary" id="availability-back">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar');
     document.getElementById('availability-back').onclick=renderCalendar;wireEventWorkspaceTabs_(eventId,e,{summaryExists:!!matchTabState?.summaryExists,attendanceExists:e.eventType==='TRAINING'&&['IN_PROGRESS','COMPLETED'].includes(e.status),officialLinks:e.eventType==='MATCH'&&!!currentAccessProfile_().capabilities?.manageCompetitions});
     document.querySelectorAll('[data-new-event-period]').forEach(btn=>btn.onclick=()=>{const person=candidates.find(p=>p.personId===btn.dataset.newEventPeriod);showAvailabilityPeriodEditor_(person,{eventId,onDone:()=>renderEventAvailability(eventId),onCancel:()=>renderEventAvailability(eventId)});});
     document.querySelectorAll('[data-new-event-absence]').forEach(btn=>btn.onclick=()=>{const person=candidates.find(p=>p.personId===btn.dataset.newEventAbsence),date=e.eventDate||new Date().toISOString().slice(0,10);showAvailabilityPeriodEditor_(person,{eventId,period:{periodType:'PERSONAL',startDate:date,endDate:date,affectsTraining:e.eventType==='TRAINING'?'TRUE':'FALSE',affectsMatches:e.eventType==='MATCH'?'TRUE':'FALSE',trainingMode:'UNAVAILABLE',matchSelectable:'FALSE'},onDone:()=>renderEventAvailability(eventId),onCancel:()=>renderEventAvailability(eventId)});});
@@ -2035,9 +2060,19 @@ async function renderEventAvailability(eventId){
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar la disponibilidad</h1><p>${escapeHtml(err.message)}</p><button class="button secondary" id="availability-error-back">Volver</button></section>`,'calendar');document.getElementById('availability-error-back')?.addEventListener('click',()=>renderEventDetail(eventId));}
 }
 
+function renderExternalRefereeMatchDetail_(e,d){
+  const meta=(d.leagueMeta||[]).find(m=>m.eventId===e.eventId)||{},persons=Object.fromEntries((d.persons||[]).map(p=>[p.personId,p]));
+  const refereeRow=(d.participants||[]).find(p=>p.eventId===e.eventId&&String(p.roleCategory||p.participantType||'').toUpperCase()==='REFEREE');
+  const referee=refereeRow?(persons[refereeRow.personId]||{}):{},competition=competitionForEvent_(e),links=competitionLinkButtons_(competition,e);
+  const competitionName=meta.calendarCategory||meta.calendarCompetition||e.competition||'—';
+  shell(`<section class="match-overview compact"><div class="match-overview-title"><span class="eyebrow">Designación arbitral · FAR</span><h1>${escapeHtml(e.title||'Partido')}</h1></div><div class="match-overview-card"><div class="match-overview-primary"><div class="match-info competition"><span>Competición</span><strong>${escapeHtml(competitionName)}</strong>${meta.calendarCompetition&&meta.calendarCompetition!==competitionName?`<small>${escapeHtml(meta.calendarCompetition)}</small>`:''}</div><div class="match-info"><span>Jornada</span><strong>${escapeHtml(meta.roundName||'—')}</strong></div><div class="match-info"><span>Fecha</span><strong>${escapeHtml(e.eventDate||'—')}</strong></div><div class="match-info"><span>Hora</span><strong>${escapeHtml(displayEventTime_(e)||'Pendiente')}</strong></div><div class="match-info"><span>Árbitro</span><strong>${escapeHtml(referee.displayName||meta.refereeName||'—')}</strong></div><div class="match-info"><span>Origen</span><strong>FAR / MatchReady</strong></div></div><div class="match-overview-location"><span>Ubicación</span><strong>${escapeHtml(e.location||'Pendiente')}</strong></div>${links?`<div class="official-link-bar"><span>Fuente oficial</span><div class="button-row">${links}</div></div>`:''}</div></section><section class="panel match-detail-panel"><div class="info-strip"><div><strong>Partido externo por designación arbitral</strong><br>Esta actividad se muestra al árbitro designado, al Coordinador de Árbitros y a Administración. No forma parte de las estadísticas deportivas de Marbella.</div></div><div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div></section>`,'calendar');
+  document.getElementById('back-calendar').onclick=renderCalendar;
+}
+
 async function renderEventDetail(eventId,requestedSection=''){
   if(!calendarData||Date.now()-calendarDataLoadedAt_>20000||!Array.isArray(calendarData.persons)||!(calendarData.events||[]).some(x=>x.eventId===eventId)){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;calendarDataLoadedAt_=Date.now();}
   const d=calendarData,e=d.events.find(x=>x.eventId===eventId);if(!e)return renderCalendar();
+  if(isExternalRefereeMatchClient_(e))return renderExternalRefereeMatchDetail_(e,d);
   if(e.eventType==='MATCH'){
     if(requestedSection&&requestedSection!=='availability')return renderMatchPlanning(eventId,requestedSection);
     if(requestedSection==='availability')return renderEventAvailability(eventId);

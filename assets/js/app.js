@@ -1,9 +1,10 @@
-const FRONTEND_BUILD = '0.6.62';
+const FRONTEND_BUILD = '0.6.63';
 const config = window.APP_BOOTSTRAP || {};
+const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.62';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.63';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
@@ -13,6 +14,7 @@ let trainingLibraryData = null;
 let seasonContext = null;
 let familyData = null;
 let structureSection = 'people';
+let settingsSection = 'general';
 const UI_STATE_KEY = 'gestionClub.uiState.v1';
 function loadUiState_(){try{return JSON.parse(sessionStorage.getItem(UI_STATE_KEY)||'{}')||{};}catch(_){return {};}}
 function saveUiStatePatch_(patch){const next=Object.assign({},loadUiState_(),patch||{});sessionStorage.setItem(UI_STATE_KEY,JSON.stringify(next));return next;}
@@ -82,6 +84,8 @@ function busyMessageForAction_(action) {
   if (/syncCompetitionFromWeb/i.test(a)) return 'Actualizando desde FAR…';
   if (/processCompetitionOfficialReports/i.test(a)) return 'Descargando y procesando actas oficiales…';
   if (/previewLeagueCalendarImport/i.test(a)) return 'Analizando calendario…';
+  if (/previewTrainingExerciseImport/i.test(a)) return 'Analizando ejercicios…';
+  if (/importTrainingExercises/i.test(a)) return 'Importando ejercicios…';
   if (/importLeagueCalendar/i.test(a)) return 'Importando calendario…';
   if (/uploadMatchReport/i.test(a)) return 'Subiendo y procesando acta…';
   if (/reprocessMatchReport/i.test(a)) return 'Reprocesando acta…';
@@ -200,6 +204,8 @@ function serverApi(request) {
       : action === 'analyzeCompetitionSource' ? 120000
       : action === 'saveCompetition' ? 60000
       : action === 'previewLeagueCalendarImport' ? 60000
+      : action === 'previewTrainingExerciseImport' ? 60000
+      : action === 'importTrainingExercises' ? 90000
       : ['uploadMatchReport','reprocessMatchReport'].includes(action) ? 120000
       : action === 'getStatisticsData' ? 60000
       : action === 'getCalendarData' ? 45000
@@ -297,16 +303,21 @@ function publicAssetUrl_(path) {
   const base=String(window.GC_FRONTEND_BASE_URL||'https://alanmulloa.github.io/gestion-club').replace(/\/+$/,'');
   return `${base}/${String(path||'').replace(/^\/+/, '')}`;
 }
+function brandInitials_(name){
+  const parts=String(name||'Gestión Club').trim().split(/\s+/).filter(Boolean);
+  return (parts.slice(0,2).map(x=>x[0]||'').join('')||'GC').toUpperCase();
+}
 function brandMarkup() {
   const unauthenticated=!currentUser;
-  const name = unauthenticated ? 'MRC' : (clubConfig?.shortName || clubConfig?.officialName || config.appName || 'Gestión Club');
-  const logoSrc=clubConfig?.logoDataUrl || (unauthenticated?publicAssetUrl_('assets/img/mrc-logo.png'):'');
+  const source=unauthenticated?publicBranding:(clubConfig||publicBranding);
+  const name=source?.officialName || config.appName || 'Gestión Club';
+  const logoSrc=source?.logoDataUrl || '';
   const logo = logoSrc
-    ? `<img class="brand-logo" src="${escapeHtml(logoSrc)}" alt="Escudo del club">`
-    : `<span class="brand-mark">${escapeHtml((clubConfig?.shortName || 'GC').slice(0, 2).toUpperCase())}</span>`;
+    ? `<img class="brand-logo" src="${escapeHtml(logoSrc)}" alt="Logo del club">`
+    : `<span class="brand-mark">${escapeHtml(brandInitials_(name))}</span>`;
   const backendVersion=String(config.appVersion||'?');
   const mismatch=backendVersion!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:'';
-  const sub=unauthenticated?`Gestión Club · Versión ${escapeHtml(backendVersion)}${mismatch}`:`Versión ${escapeHtml(backendVersion)}${mismatch} · ${escapeHtml(config.environment || 'sin configurar')}`;
+  const sub=unauthenticated?`${escapeHtml(source?.description||'Gestión deportiva del club')} · ${escapeHtml(backendVersion)}${mismatch}`:`Versión ${escapeHtml(backendVersion)}${mismatch} · ${escapeHtml(config.environment || 'sin configurar')}`;
   return `${logo}<div><strong>${escapeHtml(name)}</strong><small>${sub}</small></div>`;
 }
 
@@ -428,17 +439,18 @@ function showMessage(message, kind = 'info', hostId = 'message') {
 }
 
 function renderLogin() {
-  // Antes de autenticar todavía no podemos leer la configuración privada del club.
-  // Usamos la identidad visual MRC para que el acceso tenga el mismo lenguaje que la aplicación.
-  applyClubTheme({primaryColor:'#2b4168',secondaryColor:'#21375e',accentColor:'#919b17'});
-  const publicLogo=publicAssetUrl_('assets/img/mrc-logo.png');
+  const b=publicBranding||{};
+  applyClubTheme({primaryColor:b.primaryColor||'#2b4168',secondaryColor:b.secondaryColor||'#21375e',accentColor:b.accentColor||'#919b17'});
+  const clubName=b.officialName||config.appName||'Gestión Club';
+  const description=b.description||'Gestión deportiva del club';
+  const logo=b.logoDataUrl?`<img src="${escapeHtml(b.logoDataUrl)}" alt="Logo de ${escapeHtml(clubName)}">`:`<span class="login-brand-fallback">${escapeHtml(brandInitials_(clubName))}</span>`;
   shell(`
     <section class="login-layout">
       <div class="login-intro">
-        <span class="eyebrow">Gestión deportiva</span>
+        <span class="eyebrow">${escapeHtml(description)}</span>
         <h1>Acceso al club</h1>
         <p>Entrá con la cuenta creada por la administración para consultar tu actividad, disponibilidad y gestión deportiva.</p>
-        <div class="login-club"><img src="${escapeHtml(publicLogo)}" alt="Marbella Rugby Club"><div><strong>Marbella Rugby Club</strong><small>Gestión Club · ${escapeHtml(config.environment || 'DEV')}</small></div></div>
+        <div class="login-club">${logo}<div><strong>${escapeHtml(clubName)}</strong><small>${escapeHtml(description)} · ${escapeHtml(config.environment || 'DEV')}</small></div></div>
       </div>
       <section class="panel login-panel">
         <div class="login-panel-heading"><span class="eyebrow">Cuenta</span><h2>Iniciar sesión</h2><p>Usá tu correo y contraseña de Gestión Club.</p></div>
@@ -572,116 +584,42 @@ async function hydrateSeasonManager_(){
   }catch(err){const host=document.getElementById('season-manager-content');if(host)host.innerHTML=`<div class="message error">${escapeHtml(err.message)}</div>`;}
 }
 
-async function renderClubSettings() {
-  try {
-    if (!clubConfig) await loadClubConfig();
-  } catch (error) {
-    return shell(`<section class="panel narrow"><h1>No se pudo cargar la configuración</h1><p>${escapeHtml(error.message)}</p></section>`, 'settings');
-  }
+async function renderClubSettings(section=settingsSection) {
+  settingsSection=section||'general';
+  try { if (!clubConfig) await loadClubConfig(); }
+  catch (error) { return shell(`<section class="panel narrow"><h1>No se pudo cargar la configuración</h1><p>${escapeHtml(error.message)}</p></section>`, 'settings'); }
   if (currentUser?.role !== 'ADMIN') return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>Solo un administrador puede modificar la configuración del club.</p></section>', 'settings');
-  const s = clubConfig || {};
-  const logoPreview = s.logoDataUrl ? `<img id="logo-preview" class="logo-preview" src="${escapeHtml(s.logoDataUrl)}" alt="Logo actual">` : `<div id="logo-preview" class="logo-placeholder">Sin logo</div>`;
-  shell(`
-    <section class="hero compact">
-      <span class="eyebrow">Configuración</span>
-      <h1>Identidad del club</h1>
-      <p>Datos generales, identidad visual y contacto del club. La gestión de temporadas tiene ahora su propia sección.</p>
-    </section>
-    <div class="settings-layout">
-      <form id="club-form" class="panel settings-main">
-        <div class="section-heading"><h2>Datos principales</h2><p>Información visible dentro de la aplicación.</p></div>
-        <div class="form-grid two">
-          <label>Nombre oficial<input id="official-name" maxlength="120" required value="${escapeHtml(s.officialName || '')}"></label>
-          <label>Nombre corto<input id="short-name" maxlength="40" required value="${escapeHtml(s.shortName || '')}"></label>
-          <label>Correo de contacto<input id="contact-email" type="email" maxlength="254" value="${escapeHtml(s.contactEmail || '')}"></label>
-          <label>Teléfono de contacto<input id="contact-phone" maxlength="40" value="${escapeHtml(s.contactPhone || '')}"></label>
-        </div>
-      </form>
-      <aside class="settings-side">
-        <section class="panel">
-          <div class="section-heading"><h2>Logo</h2><p>PNG, JPG o WebP. Máximo 1,5 MB.</p></div>
-          <div class="logo-box">${logoPreview}</div>
-          <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-          <div class="button-row"><button class="button secondary" type="button" id="choose-logo">Elegir logo</button>${s.logoDataUrl ? '<button class="button link danger-text" type="button" id="remove-logo">Quitar</button>' : ''}</div>
-          <div id="logo-message" class="message"></div>
-        </section>
-        <section class="panel">
-          <div class="section-heading"><h2>Colores</h2><p>Podés elegirlos manualmente o sugerirlos a partir del logo.</p></div>
-          <div class="color-list">
-            <label>Principal<div class="color-control"><input id="primary-color" type="color" value="${escapeHtml(s.primaryColor || '#176b4d')}"><input id="primary-text" class="color-text" value="${escapeHtml(s.primaryColor || '#176b4d')}" maxlength="7"></div></label>
-            <label>Secundario<div class="color-control"><input id="secondary-color" type="color" value="${escapeHtml(s.secondaryColor || '#12372a')}"><input id="secondary-text" class="color-text" value="${escapeHtml(s.secondaryColor || '#12372a')}" maxlength="7"></div></label>
-            <label>Acento<div class="color-control"><input id="accent-color" type="color" value="${escapeHtml(s.accentColor || '#d8a53b')}"><input id="accent-text" class="color-text" value="${escapeHtml(s.accentColor || '#d8a53b')}" maxlength="7"></div></label>
-          </div>
-          <button class="button secondary full" type="button" id="suggest-colors">Sugerir desde logo</button>
-        </section>
-      </aside>
-      <div class="settings-actions"><div id="message" class="message" aria-live="polite"></div><button class="button primary" type="submit" form="club-form">Guardar configuración</button></div>
-    </div>`, 'settings');
-
-  wireColorPair('primary');
-  wireColorPair('secondary');
-  wireColorPair('accent');
-  let selectedLogo = null;
-  let removeLogo = false;
-  const fileInput = document.getElementById('logo-file');
-  document.getElementById('choose-logo').onclick = () => fileInput.click();
-  fileInput.onchange = async () => {
-    const file = fileInput.files?.[0];
-    if (!file) return;
-    if (file.size > 1500000) return showMessage('El logo supera 1,5 MB.', 'error', 'logo-message');
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return showMessage('Formato de logo no permitido.', 'error', 'logo-message');
-    selectedLogo = { file, dataUrl: await fileToDataUrl(file) };
-    removeLogo = false;
-    document.getElementById('logo-preview').outerHTML = `<img id="logo-preview" class="logo-preview" src="${escapeHtml(selectedLogo.dataUrl)}" alt="Vista previa">`;
-    showMessage(file.name, 'success', 'logo-message');
-  };
-  const removeButton = document.getElementById('remove-logo');
-  if (removeButton) removeButton.onclick = () => {
-    selectedLogo = null;
-    removeLogo = true;
-    document.getElementById('logo-preview').outerHTML = '<div id="logo-preview" class="logo-placeholder">Sin logo</div>';
-    showMessage('El logo se eliminará al guardar.', 'info', 'logo-message');
-  };
-  document.getElementById('suggest-colors').onclick = async () => {
-    const dataUrl = selectedLogo?.dataUrl || clubConfig?.logoDataUrl;
-    if (!dataUrl) return showMessage('Primero seleccioná un logo.', 'error', 'logo-message');
-    try {
-      const palette = await extractPalette(dataUrl);
-      setColor('primary', palette[0]);
-      setColor('secondary', palette[1]);
-      setColor('accent', palette[2]);
-      applyClubTheme({ primaryColor: palette[0], secondaryColor: palette[1], accentColor: palette[2] });
-      showMessage('Paleta sugerida. Podés ajustarla antes de guardar.', 'success', 'logo-message');
-    } catch (error) { showMessage('No se pudo analizar el logo.', 'error', 'logo-message'); }
-  };
-  document.getElementById('club-form').onsubmit = async event => {
-    event.preventDefault();
-    const button = event.submitter;
-    button.disabled = true;
-    showMessage('Guardando configuración…');
-    try {
-      const payload = {
-        officialName: document.getElementById('official-name').value.trim(),
-        shortName: document.getElementById('short-name').value.trim(),
-        contactEmail: document.getElementById('contact-email').value.trim(),
-        contactPhone: document.getElementById('contact-phone').value.trim(),
-        primaryColor: document.getElementById('primary-text').value.trim(),
-        secondaryColor: document.getElementById('secondary-text').value.trim(),
-        accentColor: document.getElementById('accent-text').value.trim(),
-        logoDataUrl: selectedLogo?.dataUrl || '',
-        logoOriginalName: selectedLogo?.file?.name || '',
-        removeLogo
-      };
-      const { data } = await call('saveClubConfig', payload);
-      clubConfig = data;
-      applyClubTheme(clubConfig);
-      showToast_('Configuración guardada correctamente.');
-      await renderClubSettings();
-    } catch (error) {
-      showMessage(error.message, 'error');
-      button.disabled = false;
-    }
-  };
+  const s=clubConfig||{},tabs=[['general','General'],['identity','Identidad visual'],['imports','Importaciones'],['system','Sistema']];
+  const tabsHtml=`<nav class="settings-tabs" aria-label="Secciones de configuración">${tabs.map(([key,label])=>`<button type="button" class="settings-tab ${settingsSection===key?'active':''}" data-settings-tab="${key}">${label}</button>`).join('')}</nav>`;
+  let content='';
+  if(settingsSection==='general'){
+    content=`<form id="club-general-form" class="panel settings-section-panel"><div class="section-heading"><h2>Datos generales</h2><p>Estos datos se reutilizan en la aplicación y en la pantalla de acceso.</p></div><div class="form-grid two"><label>Nombre del club<input id="official-name" maxlength="120" required value="${escapeHtml(s.officialName||'')}"></label><label class="full">Descripción<textarea id="club-description" maxlength="220" rows="3" placeholder="Ej. Gestión deportiva del club">${escapeHtml(s.description||'')}</textarea><small>Reemplaza el antiguo “nombre corto” y también se muestra en el login.</small></label><label>Correo de contacto<input id="contact-email" type="email" maxlength="254" value="${escapeHtml(s.contactEmail||'')}"></label><label>Teléfono de contacto<input id="contact-phone" maxlength="40" value="${escapeHtml(s.contactPhone||'')}"></label></div><div class="settings-info-grid"><article><span>Temporada activa</span><strong>${escapeHtml(s.activeSeason?.name||'Sin configurar')}</strong></article><article><span>Zona horaria</span><strong>${escapeHtml(APP_TIMEZONE)}</strong></article></div><div class="settings-actions"><div id="message" class="message" aria-live="polite"></div><div class="button-row"><button class="button secondary" type="button" id="settings-open-seasons">Gestionar temporadas</button><button class="button primary" type="submit">Guardar cambios</button></div></div></form>`;
+  }else if(settingsSection==='identity'){
+    const logoPreview=s.logoDataUrl?`<img id="logo-preview" class="logo-preview" src="${escapeHtml(s.logoDataUrl)}" alt="Logo actual">`:`<div id="logo-preview" class="logo-placeholder">Sin logo</div>`;
+    content=`<section class="settings-identity-grid"><form id="club-identity-form" class="panel"><div class="section-heading"><h2>Identidad visual</h2><p>Logo y colores compartidos por login, cabecera y aplicación.</p></div><div class="logo-box">${logoPreview}</div><input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" hidden><div class="button-row"><button class="button secondary" type="button" id="choose-logo">Elegir logo</button>${s.logoDataUrl?'<button class="button link danger-text" type="button" id="remove-logo">Quitar</button>':''}</div><div id="logo-message" class="message"></div><div class="color-list"><label>Principal<div class="color-control"><input id="primary-color" type="color" value="${escapeHtml(s.primaryColor||'#176b4d')}"><input id="primary-text" class="color-text" value="${escapeHtml(s.primaryColor||'#176b4d')}" maxlength="7"></div></label><label>Secundario<div class="color-control"><input id="secondary-color" type="color" value="${escapeHtml(s.secondaryColor||'#12372a')}"><input id="secondary-text" class="color-text" value="${escapeHtml(s.secondaryColor||'#12372a')}" maxlength="7"></div></label><label>Acento<div class="color-control"><input id="accent-color" type="color" value="${escapeHtml(s.accentColor||'#d8a53b')}"><input id="accent-text" class="color-text" value="${escapeHtml(s.accentColor||'#d8a53b')}" maxlength="7"></div></label></div><button class="button secondary full" type="button" id="suggest-colors">Sugerir desde logo</button><div class="settings-actions"><div id="message" class="message"></div><button class="button primary" type="submit">Guardar identidad</button></div></form><aside class="panel branding-preview-card"><span class="eyebrow">Vista previa</span><div class="branding-preview-head" id="branding-preview-head">${s.logoDataUrl?`<img src="${escapeHtml(s.logoDataUrl)}" alt="Logo">`:`<span>${escapeHtml(brandInitials_(s.officialName||config.appName))}</span>`}<div><strong>${escapeHtml(s.officialName||config.appName||'Gestión Club')}</strong><small>${escapeHtml(s.description||'Gestión deportiva del club')}</small></div></div><div class="branding-preview-login"><h3>Acceso al club</h3><p>Así se verá la identidad antes de iniciar sesión.</p><button class="button primary" type="button" disabled>Entrar</button></div></aside></section>`;
+  }else if(settingsSection==='imports'){
+    content=`<section class="panel settings-section-panel"><div class="section-heading"><h2>Importaciones</h2><p>Cargas masivas controladas para mantener la información del club.</p></div><div class="settings-action-cards"><article><span class="eyebrow">Entrenamiento</span><h3>Biblioteca de ejercicios</h3><p>Importá archivos XLSX con vista previa y detección de duplicados por nombre + categoría.</p><div class="button-row"><button class="button primary" id="settings-import-exercises">Importar ejercicios</button><button class="button secondary" id="settings-open-exercises">Abrir biblioteca</button></div></article><article class="muted-card"><span class="eyebrow">Próximamente</span><h3>Más importaciones</h3><p>Este mismo patrón podrá reutilizarse para plantillas u otros catálogos sin editar Google Sheets manualmente.</p></article></div><div id="settings-import-host"></div></section>`;
+  }else{
+    content=`<section class="panel settings-section-panel"><div class="section-heading"><h2>Sistema</h2><p>Información técnica de solo lectura para comprobar la instalación.</p></div><div class="settings-system-grid"><article><span>Versión</span><strong>${escapeHtml(config.appVersion||FRONTEND_BUILD)}</strong></article><article><span>Entorno</span><strong>${escapeHtml(config.environment||'—')}</strong></article><article><span>Frontend</span><strong>${escapeHtml(FRONTEND_BUILD)}</strong></article><article><span>Zona horaria</span><strong>${escapeHtml(APP_TIMEZONE)}</strong></article><article><span>Autenticación</span><strong>${escapeHtml(config.authMode||'SHEETS_PASSWORD')}</strong></article><article><span>Temporada activa</span><strong>${escapeHtml(s.activeSeason?.name||'Sin configurar')}</strong></article></div><div class="info-strip">Las operaciones de inicialización destructiva no se exponen desde esta pantalla.</div></section>`;
+  }
+  shell(`<section class="hero compact"><span class="eyebrow">Administración</span><h1>Configuración</h1><p>Identidad, datos generales, importaciones y estado del sistema en una única sección.</p></section>${tabsHtml}${content}`,'settings');
+  document.querySelectorAll('[data-settings-tab]').forEach(btn=>btn.onclick=()=>renderClubSettings(btn.dataset.settingsTab));
+  if(settingsSection==='general'){
+    document.getElementById('settings-open-seasons')?.addEventListener('click',renderSeasons);
+    document.getElementById('club-general-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;if(button)button.disabled=true;try{const payload={officialName:val('official-name'),description:val('club-description'),contactEmail:val('contact-email'),contactPhone:val('contact-phone'),primaryColor:s.primaryColor||'#176b4d',secondaryColor:s.secondaryColor||'#12372a',accentColor:s.accentColor||'#d8a53b'};const {data}=await call('saveClubConfig',payload);clubConfig=data;Object.assign(publicBranding,{officialName:data.officialName,description:data.description,primaryColor:data.primaryColor,secondaryColor:data.secondaryColor,accentColor:data.accentColor,logoDataUrl:data.logoDataUrl||''});applyClubTheme(data);showToast_('Configuración general guardada.');await renderClubSettings('general');}catch(error){showMessage(error.message,'error');if(button)button.disabled=false;}};
+  }
+  if(settingsSection==='identity'){
+    wireColorPair('primary');wireColorPair('secondary');wireColorPair('accent');let selectedLogo=null,removeLogo=false;const fileInput=document.getElementById('logo-file');
+    const refreshBrandPreview=()=>{const host=document.getElementById('branding-preview-head');if(!host)return;const logo=selectedLogo?.dataUrl||(!removeLogo?s.logoDataUrl:'');host.innerHTML=`${logo?`<img src="${escapeHtml(logo)}" alt="Logo">`:`<span>${escapeHtml(brandInitials_(s.officialName||config.appName))}</span>`}<div><strong>${escapeHtml(s.officialName||config.appName||'Gestión Club')}</strong><small>${escapeHtml(s.description||'Gestión deportiva del club')}</small></div>`;};
+    document.getElementById('choose-logo').onclick=()=>fileInput.click();fileInput.onchange=async()=>{const file=fileInput.files?.[0];if(!file)return;if(file.size>1500000)return showMessage('El logo supera 1,5 MB.','error','logo-message');if(!['image/png','image/jpeg','image/webp'].includes(file.type))return showMessage('Formato de logo no permitido.','error','logo-message');selectedLogo={file,dataUrl:await fileToDataUrl(file)};removeLogo=false;document.getElementById('logo-preview').outerHTML=`<img id="logo-preview" class="logo-preview" src="${escapeHtml(selectedLogo.dataUrl)}" alt="Vista previa">`;refreshBrandPreview();showMessage(file.name,'success','logo-message');};
+    document.getElementById('remove-logo')?.addEventListener('click',()=>{selectedLogo=null;removeLogo=true;document.getElementById('logo-preview').outerHTML='<div id="logo-preview" class="logo-placeholder">Sin logo</div>';refreshBrandPreview();showMessage('El logo se eliminará al guardar.','info','logo-message');});
+    document.getElementById('suggest-colors').onclick=async()=>{const dataUrl=selectedLogo?.dataUrl||s.logoDataUrl;if(!dataUrl)return showMessage('Primero seleccioná un logo.','error','logo-message');try{const palette=await extractPalette(dataUrl);setColor('primary',palette[0]);setColor('secondary',palette[1]);setColor('accent',palette[2]);applyClubTheme({primaryColor:palette[0],secondaryColor:palette[1],accentColor:palette[2]});showMessage('Paleta sugerida. Podés ajustarla antes de guardar.','success','logo-message');}catch(_){showMessage('No se pudo analizar el logo.','error','logo-message');}};
+    document.getElementById('club-identity-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;if(button)button.disabled=true;try{const payload={officialName:s.officialName||config.appName||'Gestión Club',description:s.description||'',contactEmail:s.contactEmail||'',contactPhone:s.contactPhone||'',primaryColor:val('primary-text'),secondaryColor:val('secondary-text'),accentColor:val('accent-text'),logoDataUrl:selectedLogo?.dataUrl||'',logoOriginalName:selectedLogo?.file?.name||'',removeLogo};const {data}=await call('saveClubConfig',payload);clubConfig=data;Object.assign(publicBranding,{officialName:data.officialName,description:data.description,primaryColor:data.primaryColor,secondaryColor:data.secondaryColor,accentColor:data.accentColor,logoDataUrl:data.logoDataUrl||''});applyClubTheme(data);showToast_('Identidad visual guardada. Se aplicará también al próximo login.');await renderClubSettings('identity');}catch(error){showMessage(error.message,'error');if(button)button.disabled=false;}};
+  }
+  if(settingsSection==='imports'){
+    document.getElementById('settings-open-exercises')?.addEventListener('click',renderTrainingExercises);
+    document.getElementById('settings-import-exercises')?.addEventListener('click',()=>openTrainingExerciseImport_('settings-import-host',()=>renderClubSettings('imports')));
+  }
 }
 
 
@@ -1518,6 +1456,18 @@ function trainingExerciseCard_(exercise,data){
   const image=exercise.imageUrl?`<div class="exercise-card-media"><img src="${escapeHtml(exercise.imageUrl)}" alt="${escapeHtml(exercise.name||'Ejercicio')}" loading="lazy" onerror="this.parentElement.classList.add('media-error');this.remove()"></div>`:'';
   return `<article class="exercise-card ${exercise.status==='INACTIVE'?'is-inactive':''}" data-exercise-card="${escapeHtml(exercise.exerciseId)}">${image}<div class="exercise-card-body"><div class="exercise-card-meta"><span class="badge active">${escapeHtml(trainingExerciseCategoryClient_(exercise.category))}</span>${duration?`<span class="exercise-duration">${duration} min</span>`:''}${exercise.status==='INACTIVE'?'<span class="badge inactive">INACTIVO</span>':''}</div><h3>${escapeHtml(exercise.name||'Ejercicio')}</h3><p>${escapeHtml(exercise.objective||exercise.description||'Sin objetivo definido.')}</p>${coaching.length?`<ul class="exercise-points-preview">${coaching.slice(0,3).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}<div class="exercise-card-footer"><small>${escapeHtml(trainingExerciseScopeLabel_(exercise,data.divisions))}</small>${tags.length?`<div class="tag-row">${tags.slice(0,4).map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>`:''}</div><div class="button-row"><button type="button" class="button mini secondary" data-view-exercise="${escapeHtml(exercise.exerciseId)}">Ver</button>${data.canManage?`<button type="button" class="button mini secondary" data-edit-exercise="${escapeHtml(exercise.exerciseId)}">Editar</button>`:''}${exercise.videoUrl?`<a class="button mini link" href="${escapeHtml(exercise.videoUrl)}" target="_blank" rel="noopener">Vídeo / enlace</a>`:''}</div></div></article>`;
 }
+async function openTrainingExerciseImport_(hostId='exercise-import-host',afterImport=null){
+  const host=document.getElementById(hostId);if(!host)return;
+  let data;try{data=await loadTrainingLibraryData_();}catch(err){host.innerHTML=`<div class="message error">${escapeHtml(err.message)}</div>`;return;}
+  if(!data.canManage){host.innerHTML='<div class="message error">No tienes permiso para importar ejercicios.</div>';return;}
+  host.innerHTML=`<section class="inline-editor exercise-import-panel"><div class="editor-heading"><div><span class="eyebrow">Importación XLSX</span><h2>Importar ejercicios</h2><p>Se detectan duplicados por <strong>nombre + categoría</strong> antes de modificar la biblioteca.</p></div><button class="button link" type="button" id="exercise-import-close">Cerrar</button></div><div class="form-grid two"><label>Archivo XLSX<input id="exercise-import-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label><label>Si ya existe<select id="exercise-import-duplicates"><option value="SKIP">Omitir duplicado</option><option value="UPDATE">Actualizar ejercicio existente</option></select></label></div><fieldset class="exercise-division-fieldset"><legend>Aplicar a divisiones</legend><p>Si no seleccionás ninguna, se respeta el alcance del archivo. El pack inicial queda disponible para todas las divisiones.</p><div class="exercise-division-grid">${(data.divisions||[]).map(d=>`<label class="check-row"><input type="checkbox" data-exercise-import-division="${escapeHtml(d.divisionId)}"> ${escapeHtml(d.name)}</label>`).join('')}</div></fieldset><div class="button-row"><button class="button secondary" type="button" id="exercise-import-preview">Analizar archivo</button></div><div id="exercise-import-preview-host"></div><div id="exercise-import-message" class="message"></div></section>`;
+  document.getElementById('exercise-import-close').onclick=()=>host.innerHTML='';
+  let selectedFile=null,dataUrl='';
+  document.getElementById('exercise-import-file').onchange=()=>{selectedFile=document.getElementById('exercise-import-file').files?.[0]||null;dataUrl='';document.getElementById('exercise-import-preview-host').innerHTML='';showMessage('','','exercise-import-message');};
+  document.getElementById('exercise-import-preview').onclick=async()=>{selectedFile=document.getElementById('exercise-import-file').files?.[0]||selectedFile;if(!selectedFile)return showMessage('Seleccioná un archivo XLSX.','error','exercise-import-message');if(!/\.xlsx$/i.test(selectedFile.name))return showMessage('El archivo debe ser .xlsx.','error','exercise-import-message');if(selectedFile.size>4500000)return showMessage('El archivo supera 4,5 MB.','error','exercise-import-message');try{dataUrl=dataUrl||await fileToDataUrl(selectedFile);const {data:preview}=await call('previewTrainingExerciseImport',{seasonId:selectedSeasonId_(),fileName:selectedFile.name,dataUrl});const rows=(preview.items||[]).slice(0,40).map(x=>`<tr><td>${escapeHtml(x.sourceRow)}</td><td><strong>${escapeHtml(x.name)}</strong><small>${escapeHtml(x.objective||'')}</small></td><td>${escapeHtml(x.categoryLabel)}</td><td>${escapeHtml(x.recommendedDurationMinutes||'—')}</td><td>${x.duplicate?'<span class="status-pill warning">Ya existe</span>':'<span class="status-pill success">Nuevo</span>'}</td></tr>`).join('');document.getElementById('exercise-import-preview-host').innerHTML=`<div class="import-summary"><strong>${preview.count} ejercicio(s)</strong><span>${preview.newCount} nuevos · ${preview.duplicateCount} duplicados</span></div><div class="table-wrap compact-table"><table><thead><tr><th>Fila</th><th>Ejercicio</th><th>Categoría</th><th>Min.</th><th>Resultado</th></tr></thead><tbody>${rows}</tbody></table></div>${preview.count>40?`<p class="helper">Vista previa de los primeros 40 de ${preview.count}.</p>`:''}<button class="button primary" type="button" id="exercise-import-confirm">Importar ${preview.count} ejercicio(s)</button>`;document.getElementById('exercise-import-confirm').onclick=async()=>{const divisionIds=[...document.querySelectorAll('[data-exercise-import-division]:checked')].map(x=>x.dataset.exerciseImportDivision);try{const {data:result}=await call('importTrainingExercises',{seasonId:selectedSeasonId_(),fileName:selectedFile.name,dataUrl,duplicateMode:val('exercise-import-duplicates'),divisionIds});trainingLibraryData=null;showToast_(`Importación completada: ${result.created} nuevos · ${result.updated} actualizados · ${result.skipped} omitidos.`,'success',6000);if(afterImport)await afterImport();else await renderTrainingExercises();}catch(err){showMessage(err.message,'error','exercise-import-message');}};showMessage('Vista previa lista. Revisá los duplicados antes de importar.','success','exercise-import-message');}catch(err){showMessage(err.message,'error','exercise-import-message');}};
+  host.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
 async function renderTrainingExercises(){
   if(!currentAccessProfile_().capabilities?.viewTrainingLibrary)return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>No tienes acceso a la biblioteca de ejercicios.</p></section>','exercises');
   try{await loadTrainingLibraryData_();}catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar la biblioteca</h1><p>${escapeHtml(err.message)}</p><button class="button secondary" id="exercise-retry">Reintentar</button></section>`,'exercises');}
@@ -1526,11 +1476,12 @@ async function renderTrainingExercises(){
     const divs=trainingExerciseJsonListClient_(ex.divisionIdsJson),haystack=textNorm_([ex.name,ex.objective,ex.description,ex.materials,ex.tags,trainingExerciseCategoryClient_(ex.category)].join(' '));
     return (!q||haystack.includes(q))&&(!category||ex.category===category)&&(!status||ex.status===status)&&(!divisionId||!divs.length||divs.includes(divisionId));
   });
-  shell(`<section class="hero compact"><span class="eyebrow">Entrenamiento</span><h1>Biblioteca de ejercicios</h1><p>Creá ejercicios reutilizables con objetivos, coaching points, material y variantes. En la siguiente fase podrán incorporarse directamente al plan de cada sesión.</p></section><section class="panel management-panel"><div class="panel-heading"><div><h2>Ejercicios</h2><p>${filtered.length} de ${(data.exercises||[]).length} ejercicio(s).</p></div>${data.canManage?'<button class="button primary" id="new-training-exercise">Nuevo ejercicio</button>':''}</div><div class="filter-bar"><label class="filter-grow">Buscar<input id="exercise-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Nombre, objetivo, material, etiqueta…"></label><label>Categoría<select id="exercise-filter-category"><option value="">Todas</option>${(data.categories||[]).map(c=>`<option value="${escapeHtml(c.value)}" ${category===c.value?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select></label><label>División<select id="exercise-filter-division"><option value="">Todas</option>${(data.divisions||[]).map(d=>`<option value="${escapeHtml(d.divisionId)}" ${divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="exercise-filter-status"><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="" ${status===''?'selected':''}>Todos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option></select></label><button class="button secondary filter-clear" id="exercise-filter-clear">Limpiar</button></div>${filtered.length?`<div class="exercise-library-grid">${filtered.map(ex=>trainingExerciseCard_(ex,data)).join('')}</div>`:emptyTable('No hay ejercicios que coincidan con los filtros.')}<div id="exercise-editor-host"></div><div id="exercise-message" class="message"></div></section>`,'exercises');
+  shell(`<section class="hero compact"><span class="eyebrow">Entrenamiento</span><h1>Biblioteca de ejercicios</h1><p>Creá ejercicios reutilizables con objetivos, coaching points, material y variantes. En la siguiente fase podrán incorporarse directamente al plan de cada sesión.</p></section><section class="panel management-panel"><div class="panel-heading"><div><h2>Ejercicios</h2><p>${filtered.length} de ${(data.exercises||[]).length} ejercicio(s).</p></div>${data.canManage?'<div class="button-row compact-actions"><button class="button secondary" id="import-training-exercises">Importar XLSX</button><button class="button primary" id="new-training-exercise">Nuevo ejercicio</button></div>':''}</div><div class="filter-bar"><label class="filter-grow">Buscar<input id="exercise-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Nombre, objetivo, material, etiqueta…"></label><label>Categoría<select id="exercise-filter-category"><option value="">Todas</option>${(data.categories||[]).map(c=>`<option value="${escapeHtml(c.value)}" ${category===c.value?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select></label><label>División<select id="exercise-filter-division"><option value="">Todas</option>${(data.divisions||[]).map(d=>`<option value="${escapeHtml(d.divisionId)}" ${divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="exercise-filter-status"><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="" ${status===''?'selected':''}>Todos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option></select></label><button class="button secondary filter-clear" id="exercise-filter-clear">Limpiar</button></div>${filtered.length?`<div class="exercise-library-grid">${filtered.map(ex=>trainingExerciseCard_(ex,data)).join('')}</div>`:emptyTable('No hay ejercicios que coincidan con los filtros.')}<div id="exercise-import-host"></div><div id="exercise-editor-host"></div><div id="exercise-message" class="message"></div></section>`,'exercises');
   const apply=()=>{saveUiStatePatch_({exerciseFilters:{q:val('exercise-filter-q'),category:val('exercise-filter-category'),divisionId:val('exercise-filter-division'),status:val('exercise-filter-status')}});renderTrainingExercises();};
   ['exercise-filter-category','exercise-filter-division','exercise-filter-status'].forEach(id=>document.getElementById(id)?.addEventListener('change',apply));
   document.getElementById('exercise-filter-q')?.addEventListener('change',apply);document.getElementById('exercise-filter-q')?.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();apply();}});
   document.getElementById('exercise-filter-clear')?.addEventListener('click',()=>{saveUiStatePatch_({exerciseFilters:{status:'ACTIVE'}});renderTrainingExercises();});
+  document.getElementById('import-training-exercises')?.addEventListener('click',()=>openTrainingExerciseImport_('exercise-import-host'));
   document.getElementById('new-training-exercise')?.addEventListener('click',()=>showTrainingExerciseEditor_({status:'ACTIVE'}));
   document.querySelectorAll('[data-view-exercise]').forEach(b=>b.onclick=()=>showTrainingExerciseDetail_((data.exercises||[]).find(x=>x.exerciseId===b.dataset.viewExercise)));
   document.querySelectorAll('[data-edit-exercise]').forEach(b=>b.onclick=()=>showTrainingExerciseEditor_((data.exercises||[]).find(x=>x.exerciseId===b.dataset.editExercise)));

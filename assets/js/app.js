@@ -1,14 +1,15 @@
-const FRONTEND_BUILD = '0.6.60';
+const FRONTEND_BUILD = '0.6.61';
 const config = window.APP_BOOTSTRAP || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.60';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.61';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let clubConfig = null;
 let structureData = null;
 let statisticsData = null;
+let trainingLibraryData = null;
 let seasonContext = null;
 let familyData = null;
 let structureSection = 'people';
@@ -331,24 +332,26 @@ function seasonSwitcherMarkup_(){
 function resetSeasonScopedUi_(seasonId){
   const ui=loadUiState_(),calendar=Object.assign({},ui.calendarFilters||{},{divisionId:'',teamId:''}),statistics=Object.assign({},ui.statisticsFilters||{},{seasonId:seasonId||'',divisionId:'',teamId:''}),people=Object.assign({},ui.peopleFilters||{},{divisionId:''});
   saveUiStatePatch_({selectedSeasonId:seasonId||'',calendarFilters:calendar,statisticsFilters:statistics,peopleFilters:people});
-  structureData=null;invalidateCalendarCaches_();statisticsData=null;
+  structureData=null;invalidateCalendarCaches_();statisticsData=null;trainingLibraryData=null;
 }
 function rerenderForSeason_(active){
   if(active==='home')return renderDashboard();
   if(active==='structure')return renderStructure();
   if(active==='calendar')return renderCalendar();
+  if(active==='exercises')return renderTrainingExercises();
   if(active==='statistics')return renderStatistics();
   if(active==='seasons')return renderSeasons();
 }
 
 function navigationForRole() {
   const p=currentAccessProfile_(),c=p.capabilities||{};
-  const all=[['home','Inicio'],['structure',c.browseStructure?'Estructura':'Mi perfil'],['documents','Documentos'],['calendar','Calendario'],['statistics','Estadísticas'],['users','Usuarios'],['seasons','Temporadas'],['settings','Configuración']];
+  const all=[['home','Inicio'],['structure',c.browseStructure?'Estructura':'Mi perfil'],['documents','Documentos'],['calendar','Calendario'],['exercises','Ejercicios'],['statistics','Estadísticas'],['users','Usuarios'],['seasons','Temporadas'],['settings','Configuración']];
   return all.filter(([key])=>{
     if(key==='home')return true;
     if(key==='structure')return !!c.viewStructure;
     if(key==='documents')return !!c.viewDocuments;
     if(key==='calendar')return !!c.viewCalendar;
+    if(key==='exercises')return !!c.viewTrainingLibrary;
     if(key==='statistics')return !!c.viewStatistics;
     if(key==='users')return !!c.manageUsers;
     if(key==='seasons'||key==='settings')return !!p.isAdmin;
@@ -359,13 +362,14 @@ function navigationForRole() {
 function navMarkup(active) {
   if (!currentUser) return '';
   return navigationForRole().map(([key,label]) =>
-    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',statistics:'▥',users:'◎',seasons:'◫',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
+    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',exercises:'◇',statistics:'▥',users:'◎',seasons:'◫',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
   ).join('');
 }
 
 function dashboardCardsForRole() {
   const p=currentAccessProfile_(),c=p.capabilities||{},cards=[];
   if(c.viewCalendar)cards.push(['Actividad','Calendario deportivo','Entrenamientos, partidos, disponibilidad y convocatorias.','go-calendar','primary']);
+  if(c.viewTrainingLibrary)cards.push(['Entrenamiento','Biblioteca de ejercicios','Ejercicios reutilizables, coaching points, material y variantes.','go-exercises','secondary']);
   if(c.viewStructure)cards.push(['Gestión','Estructura deportiva','Personas y organización dentro de tu alcance.','go-structure','secondary']);
   if(c.viewStatistics)cards.push(['Rendimiento','Estadísticas','Minutos, convocatorias, puntos, disciplina y resultados.','go-statistics','secondary']);
   if(c.viewDocuments)cards.push(['Archivos','Documentación','Consultá tu documentación y la que tu rol permita gestionar.','go-documents','secondary']);
@@ -400,6 +404,7 @@ function shell(content, active = 'home') {
       if(nav==='documents') return renderDocuments();
       if(nav==='users') return renderUsers();
       if(nav==='calendar') return renderCalendar();
+      if(nav==='exercises') return renderTrainingExercises();
       if(nav==='statistics') return renderStatistics();
       if(nav==='seasons') return renderSeasons();
       return renderDashboard();
@@ -497,6 +502,7 @@ async function renderDashboard() {
   wire('go-documents',renderDocuments);
   wire('go-users',renderUsers);
   wire('go-calendar',renderCalendar);
+  wire('go-exercises',renderTrainingExercises);
   wire('go-statistics',renderStatistics);
   wire('go-seasons',renderSeasons);
   wire('go-settings',renderClubSettings);
@@ -1473,6 +1479,62 @@ function renderAgenda(events){
 
 function statsNumber_(value){return Number(value||0).toLocaleString('es-ES');}
 function statisticsResultLabel_(m){const pf=Number(m.resultFor||0),pa=Number(m.resultAgainst||0);return pf>pa?'Victoria':pf<pa?'Derrota':'Empate';}
+
+function trainingExerciseJsonListClient_(value){
+  if(Array.isArray(value))return value;
+  try{const parsed=JSON.parse(String(value||'[]'));return Array.isArray(parsed)?parsed:[];}catch(_){return [];}
+}
+function trainingExerciseCategoryClient_(value){
+  const labels={ACTIVATION:'Activación',SKILL:'Destreza',PASSING:'Pase',KICKING:'Patada',CONTACT:'Contacto',TACKLE:'Placaje',RUCK:'Ruck',MAUL:'Maul',SCRUM:'Melé',LINEOUT:'Touch / line-out',ATTACK:'Ataque',DEFENCE:'Defensa',GAME:'Juego',FITNESS:'Preparación física',RECOVERY:'Recuperación',OTHER:'Otro'};
+  return labels[String(value||'').toUpperCase()]||'Otro';
+}
+function trainingExerciseTagsClient_(value){return String(value||'').split(',').map(x=>x.trim()).filter(Boolean);}
+function trainingExerciseScopeLabel_(exercise,divisions){
+  const ids=trainingExerciseJsonListClient_(exercise?.divisionIdsJson);if(!ids.length)return 'Todas las divisiones';
+  const byId=Object.fromEntries((divisions||[]).map(d=>[d.divisionId,d.name]));
+  return ids.map(id=>byId[id]||id).join(' · ');
+}
+async function loadTrainingLibraryData_(force=false){
+  if(trainingLibraryData&&!force)return trainingLibraryData;
+  const {data}=await call('getTrainingExercisesData',{seasonId:selectedSeasonId_()});trainingLibraryData=data||{exercises:[],divisions:[],categories:[],canManage:false};return trainingLibraryData;
+}
+function trainingExerciseCard_(exercise,data){
+  const coaching=trainingExerciseJsonListClient_(exercise.coachingPointsJson),tags=trainingExerciseTagsClient_(exercise.tags),duration=Number(exercise.recommendedDurationMinutes||0);
+  const image=exercise.imageUrl?`<div class="exercise-card-media"><img src="${escapeHtml(exercise.imageUrl)}" alt="${escapeHtml(exercise.name||'Ejercicio')}" loading="lazy" onerror="this.parentElement.classList.add('media-error');this.remove()"></div>`:'';
+  return `<article class="exercise-card ${exercise.status==='INACTIVE'?'is-inactive':''}" data-exercise-card="${escapeHtml(exercise.exerciseId)}">${image}<div class="exercise-card-body"><div class="exercise-card-meta"><span class="badge active">${escapeHtml(trainingExerciseCategoryClient_(exercise.category))}</span>${duration?`<span class="exercise-duration">${duration} min</span>`:''}${exercise.status==='INACTIVE'?'<span class="badge inactive">INACTIVO</span>':''}</div><h3>${escapeHtml(exercise.name||'Ejercicio')}</h3><p>${escapeHtml(exercise.objective||exercise.description||'Sin objetivo definido.')}</p>${coaching.length?`<ul class="exercise-points-preview">${coaching.slice(0,3).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}<div class="exercise-card-footer"><small>${escapeHtml(trainingExerciseScopeLabel_(exercise,data.divisions))}</small>${tags.length?`<div class="tag-row">${tags.slice(0,4).map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>`:''}</div><div class="button-row"><button type="button" class="button mini secondary" data-view-exercise="${escapeHtml(exercise.exerciseId)}">Ver</button>${data.canManage?`<button type="button" class="button mini secondary" data-edit-exercise="${escapeHtml(exercise.exerciseId)}">Editar</button>`:''}${exercise.videoUrl?`<a class="button mini link" href="${escapeHtml(exercise.videoUrl)}" target="_blank" rel="noopener">Vídeo / enlace</a>`:''}</div></div></article>`;
+}
+async function renderTrainingExercises(){
+  if(!currentAccessProfile_().capabilities?.viewTrainingLibrary)return shell('<section class="panel narrow"><h1>Acceso restringido</h1><p>No tienes acceso a la biblioteca de ejercicios.</p></section>','exercises');
+  try{await loadTrainingLibraryData_();}catch(err){return shell(`<section class="panel narrow"><h1>No se pudo cargar la biblioteca</h1><p>${escapeHtml(err.message)}</p><button class="button secondary" id="exercise-retry">Reintentar</button></section>`,'exercises');}
+  const data=trainingLibraryData||{},state=loadUiState_().exerciseFilters||{},q=textNorm_(state.q||''),category=state.category||'',status=state.status||'ACTIVE',divisionId=state.divisionId||'';
+  const filtered=(data.exercises||[]).filter(ex=>{
+    const divs=trainingExerciseJsonListClient_(ex.divisionIdsJson),haystack=textNorm_([ex.name,ex.objective,ex.description,ex.materials,ex.tags,trainingExerciseCategoryClient_(ex.category)].join(' '));
+    return (!q||haystack.includes(q))&&(!category||ex.category===category)&&(!status||ex.status===status)&&(!divisionId||!divs.length||divs.includes(divisionId));
+  });
+  shell(`<section class="hero compact"><span class="eyebrow">Entrenamiento</span><h1>Biblioteca de ejercicios</h1><p>Creá ejercicios reutilizables con objetivos, coaching points, material y variantes. En la siguiente fase podrán incorporarse directamente al plan de cada sesión.</p></section><section class="panel management-panel"><div class="panel-heading"><div><h2>Ejercicios</h2><p>${filtered.length} de ${(data.exercises||[]).length} ejercicio(s).</p></div>${data.canManage?'<button class="button primary" id="new-training-exercise">Nuevo ejercicio</button>':''}</div><div class="filter-bar"><label class="filter-grow">Buscar<input id="exercise-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Nombre, objetivo, material, etiqueta…"></label><label>Categoría<select id="exercise-filter-category"><option value="">Todas</option>${(data.categories||[]).map(c=>`<option value="${escapeHtml(c.value)}" ${category===c.value?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select></label><label>División<select id="exercise-filter-division"><option value="">Todas</option>${(data.divisions||[]).map(d=>`<option value="${escapeHtml(d.divisionId)}" ${divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></label><label>Estado<select id="exercise-filter-status"><option value="ACTIVE" ${status==='ACTIVE'?'selected':''}>Activos</option><option value="" ${status===''?'selected':''}>Todos</option><option value="INACTIVE" ${status==='INACTIVE'?'selected':''}>Inactivos</option></select></label><button class="button secondary filter-clear" id="exercise-filter-clear">Limpiar</button></div>${filtered.length?`<div class="exercise-library-grid">${filtered.map(ex=>trainingExerciseCard_(ex,data)).join('')}</div>`:emptyTable('No hay ejercicios que coincidan con los filtros.')}<div id="exercise-editor-host"></div><div id="exercise-message" class="message"></div></section>`,'exercises');
+  const apply=()=>{saveUiStatePatch_({exerciseFilters:{q:val('exercise-filter-q'),category:val('exercise-filter-category'),divisionId:val('exercise-filter-division'),status:val('exercise-filter-status')}});renderTrainingExercises();};
+  ['exercise-filter-category','exercise-filter-division','exercise-filter-status'].forEach(id=>document.getElementById(id)?.addEventListener('change',apply));
+  document.getElementById('exercise-filter-q')?.addEventListener('change',apply);document.getElementById('exercise-filter-q')?.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();apply();}});
+  document.getElementById('exercise-filter-clear')?.addEventListener('click',()=>{saveUiStatePatch_({exerciseFilters:{status:'ACTIVE'}});renderTrainingExercises();});
+  document.getElementById('new-training-exercise')?.addEventListener('click',()=>showTrainingExerciseEditor_({status:'ACTIVE'}));
+  document.querySelectorAll('[data-view-exercise]').forEach(b=>b.onclick=()=>showTrainingExerciseDetail_((data.exercises||[]).find(x=>x.exerciseId===b.dataset.viewExercise)));
+  document.querySelectorAll('[data-edit-exercise]').forEach(b=>b.onclick=()=>showTrainingExerciseEditor_((data.exercises||[]).find(x=>x.exerciseId===b.dataset.editExercise)));
+  document.getElementById('exercise-retry')?.addEventListener('click',async()=>{trainingLibraryData=null;await renderTrainingExercises();});
+}
+function showTrainingExerciseDetail_(exercise){
+  if(!exercise)return;const data=trainingLibraryData||{},host=document.getElementById('exercise-editor-host');if(!host)return;
+  const points=trainingExerciseJsonListClient_(exercise.coachingPointsJson),tags=trainingExerciseTagsClient_(exercise.tags),duration=Number(exercise.recommendedDurationMinutes||0);
+  host.innerHTML=`<section class="inline-editor exercise-detail"><div class="editor-heading"><div><span class="eyebrow">${escapeHtml(trainingExerciseCategoryClient_(exercise.category))}</span><h2>${escapeHtml(exercise.name)}</h2><p>${escapeHtml(trainingExerciseScopeLabel_(exercise,data.divisions))}${duration?` · ${duration} min`:''}</p></div><div class="button-row">${data.canManage?`<button type="button" class="button secondary" id="exercise-detail-edit">Editar</button>`:''}<button type="button" class="button link" id="exercise-detail-close">Cerrar</button></div></div>${exercise.imageUrl?`<img class="exercise-detail-image" src="${escapeHtml(exercise.imageUrl)}" alt="${escapeHtml(exercise.name)}">`:''}<div class="exercise-detail-grid"><div><h3>Objetivo</h3><p>${escapeHtml(exercise.objective||'Sin objetivo definido.')}</p><h3>Descripción / configuración</h3><p class="pre-line">${escapeHtml(exercise.description||'Sin descripción.')}</p>${exercise.materials?`<h3>Material</h3><p>${escapeHtml(exercise.materials)}</p>`:''}</div><div><h3>Coaching points</h3>${points.length?`<ol>${points.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ol>`:'<p class="muted">Sin coaching points.</p>'}${exercise.progressions?`<h3>Progresiones</h3><p class="pre-line">${escapeHtml(exercise.progressions)}</p>`:''}${exercise.regressions?`<h3>Regresiones / simplificaciones</h3><p class="pre-line">${escapeHtml(exercise.regressions)}</p>`:''}${tags.length?`<div class="tag-row">${tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>`:''}${exercise.videoUrl?`<p><a class="button secondary" href="${escapeHtml(exercise.videoUrl)}" target="_blank" rel="noopener">Abrir vídeo / enlace</a></p>`:''}</div></div></section>`;
+  host.scrollIntoView({behavior:'smooth',block:'start'});document.getElementById('exercise-detail-close').onclick=()=>host.innerHTML='';document.getElementById('exercise-detail-edit')?.addEventListener('click',()=>showTrainingExerciseEditor_(exercise));
+}
+function showTrainingExerciseEditor_(exercise={}){
+  const data=trainingLibraryData||{},host=document.getElementById('exercise-editor-host');if(!host||!data.canManage)return;
+  const points=trainingExerciseJsonListClient_(exercise.coachingPointsJson),selectedDivisions=trainingExerciseJsonListClient_(exercise.divisionIdsJson);
+  host.innerHTML=`<section class="inline-editor"><div class="editor-heading"><div><span class="eyebrow">Biblioteca</span><h2>${exercise.exerciseId?'Editar ejercicio':'Nuevo ejercicio'}</h2><p>Los campos quedan disponibles para reutilizarlos después en el constructor de sesiones.</p></div><button type="button" class="button link" id="exercise-editor-close">Cerrar</button></div><form id="training-exercise-form" class="form-stack"><div class="form-grid three"><label>Nombre<input id="exercise-name" maxlength="140" required value="${escapeHtml(exercise.name||'')}"></label><label>Categoría<select id="exercise-category">${(data.categories||[]).map(c=>`<option value="${escapeHtml(c.value)}" ${exercise.category===c.value?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select></label><label>Duración sugerida (min)<input id="exercise-duration" type="number" min="0" max="240" step="1" value="${escapeHtml(exercise.recommendedDurationMinutes||'')}"></label></div><label>Objetivo<textarea id="exercise-objective" rows="2" maxlength="700" placeholder="Qué queremos conseguir con este ejercicio">${escapeHtml(exercise.objective||'')}</textarea></label><label>Descripción / configuración<textarea id="exercise-description" rows="5" maxlength="3500" placeholder="Jugadores, espacio, organización y desarrollo">${escapeHtml(exercise.description||'')}</textarea></label><div class="form-grid two"><label>Coaching points<textarea id="exercise-coaching" rows="6" placeholder="Un punto por línea">${escapeHtml(points.join('\n'))}</textarea><small>Un foco técnico por línea. Máximo 12.</small></label><div class="form-stack compact"><label>Material<textarea id="exercise-materials" rows="3" maxlength="1000" placeholder="Conos, balones, escudos…">${escapeHtml(exercise.materials||'')}</textarea></label><label>Etiquetas<input id="exercise-tags" maxlength="500" value="${escapeHtml(exercise.tags||'')}" placeholder="pase, decisión, continuidad"></label></div></div><div class="form-grid two"><label>Progresiones<textarea id="exercise-progressions" rows="4" maxlength="1800" placeholder="Cómo aumentar dificultad">${escapeHtml(exercise.progressions||'')}</textarea></label><label>Regresiones / simplificaciones<textarea id="exercise-regressions" rows="4" maxlength="1800" placeholder="Cómo simplificar el ejercicio">${escapeHtml(exercise.regressions||'')}</textarea></label></div><div class="form-grid two"><label>Imagen / diagrama (URL)<input id="exercise-image-url" type="url" maxlength="1000" value="${escapeHtml(exercise.imageUrl||'')}" placeholder="https://…"></label><label>Vídeo / enlace (URL)<input id="exercise-video-url" type="url" maxlength="1000" value="${escapeHtml(exercise.videoUrl||'')}" placeholder="https://youtube.com/…"></label></div><fieldset class="exercise-division-fieldset"><legend>Aplicación por división</legend><p>Si no marcás ninguna, el ejercicio queda disponible para todas las divisiones.</p><div class="exercise-division-grid">${(data.divisions||[]).map(d=>`<label class="check-row"><input type="checkbox" data-exercise-division="${escapeHtml(d.divisionId)}" ${selectedDivisions.includes(d.divisionId)?'checked':''}> ${escapeHtml(d.name)}</label>`).join('')}</div></fieldset><div class="form-grid two"><label>Estado<select id="exercise-status"><option value="ACTIVE" ${exercise.status!=='INACTIVE'?'selected':''}>Activo</option><option value="INACTIVE" ${exercise.status==='INACTIVE'?'selected':''}>Inactivo</option></select></label></div><div class="editor-actions"><div id="exercise-editor-message" class="message"></div><button type="submit" class="button primary">Guardar ejercicio</button></div></form></section>`;
+  host.scrollIntoView({behavior:'smooth',block:'start'});document.getElementById('exercise-editor-close').onclick=()=>host.innerHTML='';
+  document.getElementById('training-exercise-form').onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;const divisionIds=[...document.querySelectorAll('[data-exercise-division]:checked')].map(x=>x.dataset.exerciseDivision);try{const saved=(await call('saveTrainingExercise',{exerciseId:exercise.exerciseId||'',seasonId:selectedSeasonId_(),name:val('exercise-name'),category:val('exercise-category'),recommendedDurationMinutes:val('exercise-duration'),objective:val('exercise-objective'),description:val('exercise-description'),coachingPoints:val('exercise-coaching').split(/\r?\n/),materials:val('exercise-materials'),progressions:val('exercise-progressions'),regressions:val('exercise-regressions'),imageUrl:val('exercise-image-url'),videoUrl:val('exercise-video-url'),tags:val('exercise-tags'),divisionIds:divisionIds,status:val('exercise-status')})).data;showToast_('Ejercicio guardado.');trainingLibraryData=null;await renderTrainingExercises();setTimeout(()=>{const ex=(trainingLibraryData?.exercises||[]).find(x=>x.exerciseId===saved.exerciseId);if(ex)showTrainingExerciseDetail_(ex);},0);}catch(err){showMessage(err.message,'error','exercise-editor-message');if(button)button.disabled=false;}};
+}
+
 async function renderStatistics(filters={}){
   try{
     const previous=loadUiState_().statisticsFilters||{};const requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_()});const {data}=await call('getStatisticsData',requested);statisticsData=data;const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x])),teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x]));const f=data.filters||{},summary=data.summary||{};

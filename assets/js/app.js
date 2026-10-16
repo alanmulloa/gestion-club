@@ -1,10 +1,10 @@
-const FRONTEND_BUILD = '0.6.76';
+const FRONTEND_BUILD = '0.6.77';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.76';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.77';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let simulationCandidates = [];
@@ -12,6 +12,8 @@ let simulationState = {personId:'',displayName:'',email:'',accessProfile:null,al
 let clubConfig = null;
 let structureData = null;
 let statisticsData = null;
+let statisticsDataCacheKey = '';
+let statisticsDataCachedAt = 0;
 let trainingLibraryData = null;
 let seasonContext = null;
 let familyData = null;
@@ -31,6 +33,28 @@ function formatAppDateTime_(value){
   }catch(_){return String(value||'').replace('T',' ').slice(0,16);}
 }
 
+
+const PERFORMANCE_HISTORY_KEY='gestionClub.performance.v1';
+const PERFORMANCE_HISTORY_DAYS=7;
+const PERFORMANCE_HISTORY_LIMIT=300;
+function performanceHistory_(){
+  try{
+    const rows=JSON.parse(localStorage.getItem(PERFORMANCE_HISTORY_KEY)||'[]');
+    const min=Date.now()-PERFORMANCE_HISTORY_DAYS*86400000;
+    return (Array.isArray(rows)?rows:[]).filter(x=>Number(x.at||0)>=min).slice(-PERFORMANCE_HISTORY_LIMIT);
+  }catch(_){return [];}
+}
+function savePerformanceHistory_(rows){try{localStorage.setItem(PERFORMANCE_HISTORY_KEY,JSON.stringify((rows||[]).slice(-PERFORMANCE_HISTORY_LIMIT)));}catch(_){}}
+function recordPerformanceMetric_(action,response,roundTripMs,success=true,transportError=''){
+  const a=String(action||'');
+  if(['getPerformanceData','status','runRuntimeMaintenance'].includes(a))return;
+  const server=response?.meta?.performance||{};
+  const row={at:Date.now(),action:a,success:!!success,roundTripMs:Math.max(0,Math.round(roundTripMs||0)),serverMs:Number(server.serverMs||0),sheetReadMs:Number(server.sheetReadMs||0),sheetWriteMs:Number(server.sheetWriteMs||0),sheetReads:Number(server.sheetReads||0),sheetWrites:Number(server.sheetWrites||0),rowsRead:Number(server.rowsRead||0),rowsWritten:Number(server.rowsWritten||0),requestCacheHits:Number(server.requestCacheHits||0),requestCacheMisses:Number(server.requestCacheMisses||0),scriptCacheHits:Number(server.scriptCacheHits||0),scriptCacheMisses:Number(server.scriptCacheMisses||0),payloadBytes:Number(server.payloadBytes||0),sheetsTouched:Number(server.sheetsTouched||0),level:String(server.level||''),errorCode:String(response?.error?.code||transportError||'')};
+  const rows=performanceHistory_();rows.push(row);savePerformanceHistory_(rows);
+}
+function performancePercentileClient_(values,pct){const nums=(values||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);if(!nums.length)return 0;return nums[Math.min(nums.length-1,Math.max(0,Math.ceil((pct/100)*nums.length)-1))];}
+function performanceFormatBytes_(bytes){const n=Number(bytes||0);if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(n<10240?1:0)} KB`;return `${(n/(1024*1024)).toFixed(1)} MB`;}
+function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getStatisticsData:'Estadísticas',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
 
 
 function readBootstrapCache_(){
@@ -260,8 +284,10 @@ async function call(action, payload = {}, fixedRequestId = null) {
   }
   const blocking = shouldBlockUiForAction_(action);
   const busyToken = beginUiBusy_(busyMessageForAction_(action), blocking);
+  const perfStarted=performance.now();
+  let response=null;
   try {
-    const response = await serverApi({
+    response = await serverApi({
       action,
       payload,
       sessionToken,
@@ -269,6 +295,8 @@ async function call(action, payload = {}, fixedRequestId = null) {
       requestId: fixedRequestId || requestId(),
       clientVersion: config.appVersion
     });
+    const roundTripMs=Math.max(0,performance.now()-perfStarted);
+    recordPerformanceMetric_(action,response,roundTripMs,!!response?.ok);
     if (!response?.ok) {
       const error = new Error(response?.error?.message || 'La operación no pudo completarse.');
       error.code = response?.error?.code || 'UNKNOWN_ERROR';
@@ -276,7 +304,11 @@ async function call(action, payload = {}, fixedRequestId = null) {
       if (['AUTH_REQUIRED', 'INVALID_SESSION', 'SESSION_EXPIRED', 'ACCOUNT_DISABLED'].includes(error.code)) clearSession();
       throw error;
     }
+    if(/^(save|create|update|delete|set|upload|import|reprocess|apply|close|reopen|assign|cancel|end|generate|copy|refresh|sync|process)/i.test(String(action||''))){statisticsData=null;statisticsDataCacheKey='';statisticsDataCachedAt=0;}
     return response;
+  } catch(error) {
+    if(!response)recordPerformanceMetric_(action,null,Math.max(0,performance.now()-perfStarted),false,error?.code||'TRANSPORT_ERROR');
+    throw error;
   } finally {
     if (busyToken) endUiBusy_(busyToken);
   }
@@ -303,6 +335,9 @@ function clearSession() {
   resetSimulationState_();
   clubConfig = null;
   seasonContext = null;
+  statisticsData = null;
+  statisticsDataCacheKey = '';
+  statisticsDataCachedAt = 0;
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
   clearBootstrapCache_();
 }
@@ -697,6 +732,47 @@ async function loadStatus() {
   }
 }
 
+function performanceAggregateClient_(rows){
+  const groups={};
+  (rows||[]).forEach(r=>{const key=r.action||'unknown',g=groups[key]||(groups[key]={action:key,count:0,durations:[],server:0,sheet:0,rows:0,payload:0,hits:0,misses:0,errors:0});g.count++;g.durations.push(Number(r.roundTripMs||0));g.server+=Number(r.serverMs||0);g.sheet+=Number(r.sheetReadMs||0);g.rows+=Number(r.rowsRead||0);g.payload+=Number(r.payloadBytes||0);g.hits+=Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0);g.misses+=Number(r.sheetReads||0);if(!r.success)g.errors++;});
+  return Object.values(groups).map(g=>({action:g.action,count:g.count,avgMs:g.count?Math.round(g.durations.reduce((a,b)=>a+b,0)/g.count):0,p95Ms:performancePercentileClient_(g.durations,95),maxMs:g.durations.length?Math.max(...g.durations):0,avgServerMs:g.count?Math.round(g.server/g.count):0,avgSheetMs:g.count?Math.round(g.sheet/g.count):0,avgRows:g.count?Math.round(g.rows/g.count):0,avgPayload:g.count?Math.round(g.payload/g.count):0,cachePct:(g.hits+g.misses)?Math.round(g.hits*100/(g.hits+g.misses)):0,errors:g.errors})).sort((a,b)=>b.p95Ms-a.p95Ms);
+}
+function performanceHealthClass_(ms,thresholds){const t=thresholds||{warningMs:1500,slowMs:2500,criticalMs:5000};return ms>=t.criticalMs?'critical':ms>=t.slowMs?'slow':ms>=t.warningMs?'warning':'ok';}
+function performanceHealthLabel_(ms,thresholds){const c=performanceHealthClass_(ms,thresholds);return c==='critical'?'Crítico':c==='slow'?'Lento':c==='warning'?'Atención':'OK';}
+function performanceRecommendations_(rows,thresholds){
+  const ranking=performanceAggregateClient_(rows),out=[];
+  if(!rows.length)return ['Todavía no hay suficientes mediciones en este navegador. Usá la aplicación o ejecutá el diagnóstico.'];
+  const p95=performancePercentileClient_(rows.map(x=>x.roundTripMs),95),slow=ranking[0];
+  if(p95>=Number(thresholds?.slowMs||2500))out.push(`El P95 está en ${p95} ms. Conviene priorizar las operaciones que superan 2,5 s.`);
+  if(slow&&slow.avgSheetMs>slow.avgServerMs*.55&&slow.avgSheetMs>400)out.push(`${performanceActionLabel_(slow.action)} dedica gran parte del backend a Google Sheets (${slow.avgSheetMs} ms de media): revisar lecturas y filtros.`);
+  if(slow&&slow.avgRows>5000)out.push(`${performanceActionLabel_(slow.action)} procesa unas ${slow.avgRows.toLocaleString('es-ES')} filas por consulta: conviene reducir el conjunto leído o precalcular agregados.`);
+  if(slow&&slow.avgPayload>500000)out.push(`${performanceActionLabel_(slow.action)} devuelve alrededor de ${performanceFormatBytes_(slow.avgPayload)}: revisar campos enviados y carga diferida.`);
+  const hits=rows.reduce((a,r)=>a+Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0),0),misses=rows.reduce((a,r)=>a+Number(r.sheetReads||0),0);if(hits+misses>10&&hits/(hits+misses)<.35)out.push('El aprovechamiento de caché es bajo. Hay margen para cachear más catálogos y evitar lecturas repetidas.');
+  if(rows.some(r=>!r.success))out.push('Hay errores registrados en el período. Revisá las últimas llamadas para distinguir timeout, backend o integración externa.');
+  if(!out.length)out.push('No se detecta un cuello de botella dominante en las mediciones actuales. Seguí acumulando uso real antes de optimizar más.');
+  return out.slice(0,5);
+}
+function performancePanelMarkup_(){return `<section class="panel settings-section-panel performance-panel"><div class="panel-heading"><div><span class="eyebrow">Rendimiento</span><h2>Monitorización y optimización</h2><p>Mediciones reales de este navegador + registro central de llamadas lentas y errores.</p></div><div class="button-row"><button class="button secondary" id="performance-refresh">Actualizar</button><button class="button primary" id="performance-diagnostic">Ejecutar diagnóstico</button></div></div><div id="performance-summary" class="performance-summary"><strong>Recopilando métricas…</strong><span>Las mediciones no añaden una escritura a Sheets en cada consulta.</span></div><div id="performance-kpis" class="performance-kpis"></div><div class="performance-two-col"><article><div class="section-heading"><div><h3>Operaciones más lentas</h3><p>P50/P95 se calculan con las llamadas reales conservadas durante 7 días en este navegador.</p></div></div><div id="performance-ranking"></div></article><article><div class="section-heading"><div><h3>Diagnóstico</h3><p>Señales para decidir dónde optimizar.</p></div></div><div id="performance-recommendations"></div></article></div><div class="section-heading"><div><h3>Últimas llamadas</h3><p>Backend, Sheets, filas procesadas, payload y caché por operación.</p></div></div><div id="performance-recent"></div><details class="performance-central-log"><summary>Registro central de llamadas lentas / errores</summary><div id="performance-server-log"></div></details><div id="performance-message" class="message"></div></section>`;}
+async function loadPerformancePanel_(){
+  const host=document.getElementById('performance-kpis');if(!host)return;
+  try{
+    const {data}=await call('getPerformanceData');
+    const rows=performanceHistory_().filter(r=>!['getPerformanceData'].includes(r.action)),thresholds=data.thresholds||{warningMs:1500,slowMs:2500,criticalMs:5000},durations=rows.map(r=>r.roundTripMs),p50=performancePercentileClient_(durations,50),p95=performancePercentileClient_(durations,95),avg=durations.length?Math.round(durations.reduce((a,b)=>a+b,0)/durations.length):0,slowCount=rows.filter(r=>r.roundTripMs>=thresholds.slowMs).length,errors=rows.filter(r=>!r.success).length,ranking=performanceAggregateClient_(rows),cacheHits=rows.reduce((a,r)=>a+Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0),0),cacheMisses=rows.reduce((a,r)=>a+Number(r.sheetReads||0),0),cachePct=cacheHits+cacheMisses?Math.round(cacheHits*100/(cacheHits+cacheMisses)):0;
+    const health=performanceHealthClass_(p95,thresholds),summary=document.getElementById('performance-summary');if(summary){summary.className=`performance-summary ${health}`;summary.innerHTML=`<strong>${rows.length?`Estado ${performanceHealthLabel_(p95,thresholds)}`:'Sin muestra suficiente'}</strong><span>${rows.length?`${rows.length} llamadas · P95 ${p95} ms · ${slowCount} lentas`:'Ejecutá el diagnóstico o usá la plataforma para empezar a medir.'}</span>`;}
+    host.innerHTML=`<article><span>Promedio</span><strong>${avg} ms</strong><small>ida y vuelta</small></article><article><span>P50</span><strong>${p50} ms</strong><small>mediana</small></article><article class="${performanceHealthClass_(p95,thresholds)}"><span>P95</span><strong>${p95} ms</strong><small>objetivo &lt; ${thresholds.slowMs} ms</small></article><article><span>Caché</span><strong>${cachePct}%</strong><small>${cacheHits} hits / ${cacheMisses} misses</small></article><article><span>Lentas</span><strong>${slowCount}</strong><small>≥ ${thresholds.slowMs} ms</small></article><article class="${errors?'warning':''}"><span>Errores</span><strong>${errors}</strong><small>últimos 7 días locales</small></article>`;
+    const rankHost=document.getElementById('performance-ranking');if(rankHost)rankHost.innerHTML=ranking.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Operación</th><th>Llam.</th><th>Media</th><th>P95</th><th>Sheets</th><th>Filas</th><th>Payload</th></tr></thead><tbody>${ranking.slice(0,10).map(r=>`<tr><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td>${r.count}</td><td>${r.avgMs} ms</td><td><span class="performance-pill ${performanceHealthClass_(r.p95Ms,thresholds)}">${r.p95Ms} ms</span></td><td>${r.avgSheetMs} ms</td><td>${r.avgRows.toLocaleString('es-ES')}</td><td>${performanceFormatBytes_(r.avgPayload)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';
+    const rec=document.getElementById('performance-recommendations');if(rec)rec.innerHTML=`<div class="performance-recommendation-list">${performanceRecommendations_(rows,thresholds).map((x,i)=>`<article><span>${i+1}</span><p>${escapeHtml(x)}</p></article>`).join('')}</div><div class="info-strip">Optimización activa: caché por petición + caché de ${escapeHtml((data.optimizations?.scriptCacheSheets||[]).join(', '))} durante ${Number(data.optimizations?.scriptCacheSeconds||0)} s.</div>`;
+    const recent=document.getElementById('performance-recent');if(recent){const recentRows=rows.slice().sort((a,b)=>b.at-a.at).slice(0,20);recent.innerHTML=recentRows.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Operación</th><th>Total</th><th>Backend</th><th>Sheets</th><th>Lecturas</th><th>Filas</th><th>Payload</th><th>Caché</th></tr></thead><tbody>${recentRows.map(r=>{const hits=Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0),misses=Number(r.sheetReads||0),pct=hits+misses?Math.round(hits*100/(hits+misses)):0;return `<tr><td>${escapeHtml(formatAppDateTime_(new Date(r.at).toISOString()).slice(11))}</td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td><span class="performance-pill ${performanceHealthClass_(r.roundTripMs,thresholds)}">${r.roundTripMs} ms</span></td><td>${r.serverMs||'—'}${r.serverMs?' ms':''}</td><td>${r.sheetReadMs||0} ms</td><td>${r.sheetReads||0}</td><td>${Number(r.rowsRead||0).toLocaleString('es-ES')}</td><td>${performanceFormatBytes_(r.payloadBytes)}</td><td>${pct}%</td></tr>`;}).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';}
+    const server=document.getElementById('performance-server-log');if(server){const rr=data.recent||[];server.innerHTML=rr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Backend</th><th>Sheets</th><th>Filas</th><th>Estado</th></tr></thead><tbody>${rr.slice(0,30).map(r=>`<tr><td>${escapeHtml(formatAppDateTime_(r.occurredAt))}</td><td>${escapeHtml(performanceActionLabel_(r.action))}</td><td>${escapeHtml(r.serverMs||'0')} ms</td><td>${escapeHtml(r.sheetReadMs||'0')} ms</td><td>${Number(r.rowsRead||0).toLocaleString('es-ES')}</td><td>${String(r.success).toUpperCase()==='TRUE'?escapeHtml(r.level||'SLOW'):`Error ${escapeHtml(r.errorCode||'')}`}</td></tr>`).join('')}</tbody></table></div><p class="muted">${escapeHtml(data.retention?.mode||'')} · máximo ${Number(data.retention?.maxRows||0)} registros.</p>`:'<div class="empty-state">Todavía no se registraron llamadas ≥ 2,5 s ni errores en el servidor.</div>';}
+  }catch(error){showMessage(error.message,'error','performance-message');}
+}
+async function runPerformanceDiagnostic_(){
+  const button=document.getElementById('performance-diagnostic');if(button)button.disabled=true;showMessage('Ejecutando Mi semana, Calendario y Estadísticas…','info','performance-message');
+  const ctx=currentRoleContext_(),seasonId=selectedSeasonId_(),tests=[['getHomeDashboard',{seasonId,roleCategory:contextRoleCategory_(),divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''}],['getCalendarListData',{seasonId}],['getStatisticsData',{seasonId,contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||'',divisionId:contextSingleDivisionId_()||''}]];
+  let ok=0;for(const [action,payload] of tests){try{await call(action,payload);ok++;}catch(_){}}
+  showMessage(`Diagnóstico completado: ${ok}/${tests.length} operaciones respondieron correctamente.` ,ok===tests.length?'success':'warning','performance-message');if(button)button.disabled=false;await loadPerformancePanel_();
+}
+
 function settingsTabsMarkup_(active){
   const tabs=[['general','General'],['identity','Identidad visual'],['users','Usuarios y accesos'],['seasons','Temporadas'],['refereeing','Arbitraje'],['imports','Importaciones'],['system','Sistema']];
   return `<nav class="settings-tabs" aria-label="Secciones de configuración">${tabs.map(([key,label])=>`<button type="button" class="settings-tab ${active===key?'active':''}" data-settings-tab="${key}">${label}</button>`).join('')}</nav>`;
@@ -789,7 +865,7 @@ async function renderClubSettings(section=settingsSection) {
   }else if(settingsSection==='imports'){
     content=`<section class="panel settings-section-panel"><div class="section-heading"><h2>Importaciones</h2><p>Cargas masivas controladas para mantener la información del club.</p></div><div class="settings-action-cards"><article><span class="eyebrow">Entrenamiento</span><h3>Biblioteca de ejercicios</h3><p>Importá archivos XLSX con vista previa y detección de duplicados por nombre + categoría.</p><div class="button-row"><button class="button primary" id="settings-import-exercises">Importar ejercicios</button><button class="button secondary" id="settings-open-exercises">Abrir biblioteca</button></div></article><article class="muted-card"><span class="eyebrow">Próximamente</span><h3>Más importaciones</h3><p>Este mismo patrón podrá reutilizarse para plantillas u otros catálogos sin editar Google Sheets manualmente.</p></article></div><div id="settings-import-host"></div></section>`;
   }else{
-    content=`<section class="panel settings-section-panel system-panel"><div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend, almacenamiento, OCR y sincronización del frontend.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div><div id="system-status-summary" class="system-status-summary"><strong>Comprobando…</strong><span>Validando servicios de Gestión Club.</span></div><div id="status-grid" class="status-grid system-status-grid">${statusCard('Autenticación',true,currentUser?.email||'Sesión activa')}${statusCard('Backend',false,'Comprobando…')}${statusCard('Frontend',true,`v${FRONTEND_BUILD}`)}${statusCard('Google Sheets',false,'Comprobando…')}${statusCard('Google Drive',false,'Comprobando…')}${statusCard('Drive API v3',false,'Comprobando…')}${statusCard('OCR PDF',false,'Comprobando…')}${statusCard('Respuesta completa',false,'Midiendo…')}</div><div id="system-message" class="message"></div><div class="settings-system-grid compact"><article><span>Entorno</span><strong>${escapeHtml(config.environment||'—')}</strong></article><article><span>Zona horaria</span><strong>${escapeHtml(APP_TIMEZONE)}</strong></article><article><span>Autenticación</span><strong>${escapeHtml(config.authMode||'SHEETS_PASSWORD')}</strong></article><article><span>Temporada activa</span><strong>${escapeHtml(s.activeSeason?.name||'Sin configurar')}</strong></article></div><div class="info-strip">Las operaciones de inicialización destructiva no se exponen desde esta pantalla.</div></section>`;
+    content=`<section class="panel settings-section-panel system-panel"><div class="panel-heading"><div><h2>Estado técnico</h2><p>Comprobación de backend, almacenamiento, OCR y sincronización del frontend.</p></div><button class="button secondary" id="refresh-status">Actualizar</button></div><div id="system-status-summary" class="system-status-summary"><strong>Comprobando…</strong><span>Validando servicios de Gestión Club.</span></div><div id="status-grid" class="status-grid system-status-grid">${statusCard('Autenticación',true,currentUser?.email||'Sesión activa')}${statusCard('Backend',false,'Comprobando…')}${statusCard('Frontend',true,`v${FRONTEND_BUILD}`)}${statusCard('Google Sheets',false,'Comprobando…')}${statusCard('Google Drive',false,'Comprobando…')}${statusCard('Drive API v3',false,'Comprobando…')}${statusCard('OCR PDF',false,'Comprobando…')}${statusCard('Respuesta completa',false,'Midiendo…')}</div><div id="system-message" class="message"></div><div class="settings-system-grid compact"><article><span>Entorno</span><strong>${escapeHtml(config.environment||'—')}</strong></article><article><span>Zona horaria</span><strong>${escapeHtml(APP_TIMEZONE)}</strong></article><article><span>Autenticación</span><strong>${escapeHtml(config.authMode||'SHEETS_PASSWORD')}</strong></article><article><span>Temporada activa</span><strong>${escapeHtml(s.activeSeason?.name||'Sin configurar')}</strong></article></div><div class="info-strip">Las operaciones de inicialización destructiva no se exponen desde esta pantalla.</div></section>${performancePanelMarkup_()}`;
   }
   shell(`<section class="hero compact"><span class="eyebrow">Administración</span><h1>Configuración</h1><p>Identidad, datos generales, importaciones y estado del sistema en una única sección.</p></section>${tabsHtml}${content}`,'settings');
   wireSettingsTabs_();
@@ -814,7 +890,10 @@ async function renderClubSettings(section=settingsSection) {
   }
   if(settingsSection==='system'){
     document.getElementById('refresh-status')?.addEventListener('click',loadStatus);
+    document.getElementById('performance-refresh')?.addEventListener('click',loadPerformancePanel_);
+    document.getElementById('performance-diagnostic')?.addEventListener('click',runPerformanceDiagnostic_);
     void loadStatus();
+    void loadPerformancePanel_();
   }
 }
 
@@ -1765,7 +1844,9 @@ function wireStatsBody_(tab,data){
 async function renderStatistics(filters={}){
   try{
     const ui=loadUiState_(),previous=ui.statisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||''});requested.divisionId=contextScopedDivisionId_(requested.divisionId||'');
-    const {data}=await call('getStatisticsData',requested);statisticsData=data;
+    const statsKey=JSON.stringify(requested);let data=null;
+    if(statisticsData&&statisticsDataCacheKey===statsKey&&(Date.now()-statisticsDataCachedAt)<30000)data=statisticsData;
+    else{const response=await call('getStatisticsData',requested);data=response.data;statisticsData=data;statisticsDataCacheKey=statsKey;statisticsDataCachedAt=Date.now();}
     const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x])),teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x])),f=data.filters||{};
     let activeTab=ui.statisticsTab||'summary';const allowedTabs=['summary','players','training','matches'].concat(data.access?.canCompare?['comparison']:[]);if(!allowedTabs.includes(activeTab))activeTab='summary';
     const divisionOptions=`<option value="">${data.divisions?.length>1?'Todas las divisiones':'División'}</option>`+(data.divisions||[]).map(d=>`<option value="${escapeHtml(d.divisionId)}" ${f.divisionId===d.divisionId?'selected':''}>${escapeHtml(d.name)}</option>`).join('');

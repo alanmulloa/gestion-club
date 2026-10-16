@@ -538,3 +538,14 @@ td small { margin-top: .2rem; color: var(--muted); }
 .form-grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}.stats-filter-panel{position:static}
 @media(max-width:900px){.form-grid.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.form-grid.four{grid-template-columns:1fr}}
+
+/* 0.6.76 - Flujo arbitral unificado */
+.referee-workspace-header .match-overview-card{border-left:4px solid #b45309}
+.checkbox-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.55rem;margin-top:.5rem}
+.checkbox-row{display:flex;align-items:center;gap:.55rem;padding:.6rem .7rem;border:1px solid var(--line,#d9dee7);border-radius:.65rem;background:var(--surface,#fff)}
+.checkbox-row input{width:auto;margin:0}
+.form-label{display:block;font-weight:700;margin-bottom:.25rem}
+.file-card{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;border:1px solid var(--line,#d9dee7);border-radius:.8rem;background:var(--surface,#fff)}
+.file-card>div:first-child{display:flex;flex-direction:column;gap:.25rem;min-width:0}
+.file-card small{display:block;color:var(--muted,#64748b)}
+@media(max-width:760px){.file-card{align-items:flex-start;flex-direction:column}.file-card .button-row{width:100%}}

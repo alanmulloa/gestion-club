@@ -1,10 +1,10 @@
-const FRONTEND_BUILD = '0.6.80';
+const FRONTEND_BUILD = '0.6.81';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.80';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.81';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let simulationCandidates = [];
@@ -240,6 +240,8 @@ function serverApi(request) {
     let finished = false;
     const action = request?.action || '';
     const timeoutMs = action === 'importLeagueCalendar' ? 150000
+      : action === 'syncAllFar' ? 330000
+      : action === 'syncRefereeSource' ? 180000
       : action === 'syncCompetitionFromWeb' ? 180000
       : action === 'processCompetitionOfficialReports' ? 180000
       : action === 'analyzeCompetitionSource' ? 120000
@@ -248,6 +250,7 @@ function serverApi(request) {
       : action === 'previewTrainingExerciseImport' ? 60000
       : action === 'importTrainingExercises' ? 90000
       : ['uploadMatchReport','reprocessMatchReport'].includes(action) ? 120000
+      : action === 'getPerformanceData' ? 45000
       : action === 'getStatisticsData' ? 60000
       : action === 'getCalendarData' ? 45000
       : action === 'getCalendarListData' ? 20000
@@ -288,6 +291,9 @@ function resetSimulationState_(){simulationState={personId:'',displayName:'',ema
 
 function shouldBlockUiForAction_(action){
   const a=String(action||'');
+  // Las sincronizaciones FAR pueden tardar varios minutos. El botón queda
+  // deshabilitado, pero no bloqueamos toda la navegación mientras el servidor trabaja.
+  if(['syncAllFar','syncRefereeSource'].includes(a))return false;
   return /^(login|logout|save|create|update|delete|set|upload|import|reprocess|apply|analyze|sync|process|copy|generate|review|reset|link|refreshMatchReportOfficialData)/i.test(a)
     || /^(previewLeagueCalendarImport|runTechnicalTest)$/i.test(a);
 }
@@ -775,8 +781,10 @@ async function loadFarSyncSystemStatus_(){
   const host=document.getElementById('system-far-sync-status'),button=document.getElementById('system-far-sync-now');if(!host)return;
   try{
     const {data:far}=await call('getFarSyncStatus'),last=far.lastRun||{},state=String(far.lastStatus||'NEVER'),stateLabel=state==='NEVER'?'Sin ejecutar':state;
-    host.innerHTML=`<div><strong>${far.enabled?'Automática activa':'Automática no disponible'}</strong><br><span class="status-pill ${state==='OK'?'success':state==='WARNING'||state==='ERROR'?'warning':'muted'}">${escapeHtml(stateLabel)}</span> · ${escapeHtml(far.window||'04:00–04:30 Europe/Madrid')} · Próxima: ${escapeHtml(far.nextRun||'—')}${far.lastCompletedAt?`<br><small>Última ${escapeHtml(formatAppDateTime_(far.lastCompletedAt))} · Competiciones ${Number(last.competitions?.ok||0)}/${Number(last.competitions?.total||0)} · Fuentes ${Number(last.refereeSources?.ok||0)}/${Number(last.refereeSources?.total||0)} · Documentos nuevos ${Number(last.documents?.newDocuments||0)} · ${Number(last.durationMs||0).toLocaleString('es-ES')} ms</small>`:''}${far.triggerError?`<br><small>Trigger: ${escapeHtml(far.triggerError)}</small>`:''}</div>`;
-    if(button){button.disabled=state==='RUNNING';button.onclick=async()=>{if(!confirm('¿Ejecutar ahora la sincronización FAR completa? El proceso automático diario seguirá activo.'))return;button.disabled=true;showMessage('Sincronizando FAR / MatchReady…','info','system-far-sync-message');try{const {data}=await call('syncAllFar',{seasonId:selectedSeasonId_()});showMessage(`Sincronización ${escapeHtml(String(data.status||'OK'))}: competiciones ${Number(data.competitions?.ok||0)}/${Number(data.competitions?.total||0)} · fuentes ${Number(data.refereeSources?.ok||0)}/${Number(data.refereeSources?.total||0)} · documentos nuevos ${Number(data.documents?.newDocuments||0)}.` ,data.status==='OK'?'success':'warning','system-far-sync-message');await loadFarSyncSystemStatus_();await loadPerformancePanel_();}catch(error){showMessage(error.message,'error','system-far-sync-message');button.disabled=false;}};}
+    const auth=far.triggerAuthorization||{},needsAuth=auth.status==='REQUIRED',authAction=needsAuth&&auth.authorizationUrl?`<div class="button-row"><a class="button mini primary" href="${escapeHtml(auth.authorizationUrl)}" target="_blank" rel="noopener">Autorizar automática</a><button class="button mini secondary" type="button" id="system-far-recheck">Ya autoricé · comprobar</button></div>`:'';
+    host.innerHTML=`<div><strong>${far.enabled?'Automática activa':needsAuth?'Automática pendiente de autorización':'Automática no disponible'}</strong><br><span class="status-pill ${state==='OK'?'success':state==='WARNING'||state==='ERROR'?'warning':'muted'}">${escapeHtml(stateLabel)}</span> · ${escapeHtml(far.window||'04:00–04:30 Europe/Madrid')} · Próxima: ${escapeHtml(far.nextRun||'—')}${far.lastCompletedAt?`<br><small>Última ${escapeHtml(formatAppDateTime_(far.lastCompletedAt))} · Competiciones ${Number(last.competitions?.ok||0)}/${Number(last.competitions?.total||0)} · Fuentes ${Number(last.refereeSources?.ok||0)}/${Number(last.refereeSources?.total||0)} · Documentos nuevos ${Number(last.documents?.newDocuments||0)} · ${Number(last.durationMs||0).toLocaleString('es-ES')} ms</small>`:''}${needsAuth?`<br><small>Google requiere una autorización única del usuario que publicó Apps Script para crear el trigger diario.</small>`:far.triggerError?`<br><small>Trigger: ${escapeHtml(far.triggerError)}</small>`:''}</div>${authAction}`;
+    const recheck=document.getElementById('system-far-recheck');if(recheck)recheck.onclick=()=>loadFarSyncSystemStatus_();
+    if(button){button.disabled=state==='RUNNING';button.onclick=async()=>{if(!confirm('¿Ejecutar ahora la sincronización FAR completa? El proceso automático diario seguirá activo.'))return;button.disabled=true;showMessage('Sincronizando FAR / MatchReady… Podés seguir navegando; esta operación puede tardar varios minutos.','info','system-far-sync-message');try{const {data}=await call('syncAllFar',{seasonId:selectedSeasonId_()});showMessage(`Sincronización ${escapeHtml(String(data.status||'OK'))}: competiciones ${Number(data.competitions?.ok||0)}/${Number(data.competitions?.total||0)} · fuentes ${Number(data.refereeSources?.ok||0)}/${Number(data.refereeSources?.total||0)} · documentos nuevos ${Number(data.documents?.newDocuments||0)}.` ,data.status==='OK'?'success':'warning','system-far-sync-message');await loadFarSyncSystemStatus_();await loadPerformancePanel_();}catch(error){showMessage(error.message,'error','system-far-sync-message');button.disabled=false;}};}
   }catch(error){host.innerHTML=`<div><strong>No se pudo comprobar la sincronización FAR</strong><br><small>${escapeHtml(error.message)}</small></div>`;if(button)button.disabled=false;}
 }
 
@@ -791,7 +799,7 @@ async function loadPerformancePanel_(){
     const rankHost=document.getElementById('performance-ranking');if(rankHost)rankHost.innerHTML=ranking.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Operación</th><th>Llam.</th><th>Media</th><th>P95</th><th>Sheets</th><th>Filas</th><th>Payload</th></tr></thead><tbody>${ranking.slice(0,10).map(r=>`<tr><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td>${r.count}</td><td>${r.avgMs} ms</td><td><span class="performance-pill ${performanceHealthClass_(r.p95Ms,thresholds)}">${r.p95Ms} ms</span></td><td>${r.avgSheetMs} ms</td><td>${r.avgRows.toLocaleString('es-ES')}</td><td>${performanceFormatBytes_(r.avgPayload)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';
     const rec=document.getElementById('performance-recommendations');if(rec)rec.innerHTML=`<div class="performance-recommendation-list">${performanceRecommendations_(rows,thresholds).map((x,i)=>`<article><span>${i+1}</span><p>${escapeHtml(x)}</p></article>`).join('')}</div><div class="info-strip">Optimización activa: caché por petición + caché versionada de ${escapeHtml((data.optimizations?.scriptCacheSheets||[]).join(', '))} (${escapeHtml(String(data.optimizations?.scriptCacheSeconds||'75/300 s'))}).</div>`;
     const recent=document.getElementById('performance-recent');if(recent){const recentRows=rows.slice().sort((a,b)=>b.at-a.at).slice(0,20);recent.innerHTML=recentRows.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Operación</th><th>Total</th><th>Backend</th><th>Sheets</th><th>Lecturas</th><th>Filas</th><th>Payload</th><th>Caché</th></tr></thead><tbody>${recentRows.map(r=>{const hits=Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0),misses=Number(r.requestCacheMisses||0)+Number(r.scriptCacheMisses||0),pct=hits+misses?Math.round(hits*100/(hits+misses)):0;return `<tr><td>${escapeHtml(formatAppDateTime_(new Date(r.at).toISOString()).slice(11))}</td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td><span class="performance-pill ${performanceHealthClass_(r.roundTripMs,thresholds)}">${r.roundTripMs} ms</span></td><td>${r.serverMs||'—'}${r.serverMs?' ms':''}</td><td>${r.sheetReadMs||0} ms</td><td>${r.sheetReads||0}</td><td>${Number(r.rowsRead||0).toLocaleString('es-ES')}</td><td>${performanceFormatBytes_(r.payloadBytes)}</td><td>${pct}%</td></tr>`;}).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';}
-    const server=document.getElementById('performance-server-log');if(server){const rr=data.recent||[];server.innerHTML=rr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Backend</th><th>Sheets</th><th>Filas</th><th>Estado</th></tr></thead><tbody>${rr.slice(0,30).map(r=>`<tr><td>${escapeHtml(formatAppDateTime_(r.occurredAt))}</td><td>${escapeHtml(performanceActionLabel_(r.action))}</td><td>${escapeHtml(r.serverMs||'0')} ms</td><td>${escapeHtml(r.sheetReadMs||'0')} ms</td><td>${Number(r.rowsRead||0).toLocaleString('es-ES')}</td><td>${String(r.success).toUpperCase()==='TRUE'?escapeHtml(r.level||'SLOW'):`Error ${escapeHtml(r.errorCode||'')}`}</td></tr>`).join('')}</tbody></table></div><p class="muted">${escapeHtml(data.retention?.mode||'')} · máximo ${Number(data.retention?.maxRows||0)} registros.</p>`:'<div class="empty-state">Todavía no se registraron errores, interacciones ≥ 5 s ni resúmenes de sincronización.</div>';}
+    const server=document.getElementById('performance-server-log');if(server){const rr=data.recent||[];server.innerHTML=!data.serverLogAvailable?`<div class="message warning">${escapeHtml(data.serverLogError||'El registro central no está disponible temporalmente. Las métricas locales siguen funcionando.')}</div>`:rr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Backend</th><th>Sheets</th><th>Filas</th><th>Estado</th></tr></thead><tbody>${rr.slice(0,30).map(r=>`<tr><td>${escapeHtml(formatAppDateTime_(r.occurredAt))}</td><td>${escapeHtml(performanceActionLabel_(r.action))}</td><td>${escapeHtml(r.serverMs||'0')} ms</td><td>${escapeHtml(r.sheetReadMs||'0')} ms</td><td>${Number(r.rowsRead||0).toLocaleString('es-ES')}</td><td>${String(r.success).toUpperCase()==='TRUE'?escapeHtml(r.level||'SLOW'):`Error ${escapeHtml(r.errorCode||'')}`}</td></tr>`).join('')}</tbody></table></div><p class="muted">${escapeHtml(data.retention?.mode||'')} · máximo ${Number(data.retention?.maxRows||0)} registros.</p>`:'<div class="empty-state">Todavía no se registraron errores, interacciones ≥ 5 s ni resúmenes de sincronización.</div>';}
   }catch(error){showMessage(error.message,'error','performance-message');}
 }
 async function runPerformanceDiagnostic_(){

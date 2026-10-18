@@ -1,10 +1,10 @@
-const FRONTEND_BUILD = '0.6.78';
+const FRONTEND_BUILD = '0.6.79';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
 const SESSION_STORAGE_KEY = 'gestionClub.sessionToken';
 const APP_BOOTSTRAP_CACHE_KEY = 'gestionClub.bootstrap.v2';
-const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.78';
+const RUNTIME_MAINTENANCE_SESSION_KEY = 'gestionClub.maintenance.0.6.79';
 let sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
 let currentUser = null;
 let simulationCandidates = [];
@@ -14,6 +14,9 @@ let structureData = null;
 let statisticsData = null;
 let statisticsDataCacheKey = '';
 let statisticsDataCachedAt = 0;
+let refereeStatisticsData = null;
+let refereeStatisticsDataCacheKey = '';
+let refereeStatisticsDataCachedAt = 0;
 let trainingLibraryData = null;
 let seasonContext = null;
 let familyData = null;
@@ -54,7 +57,7 @@ function recordPerformanceMetric_(action,response,roundTripMs,success=true,trans
 }
 function performancePercentileClient_(values,pct){const nums=(values||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);if(!nums.length)return 0;return nums[Math.min(nums.length-1,Math.max(0,Math.ceil((pct/100)*nums.length)-1))];}
 function performanceFormatBytes_(bytes){const n=Number(bytes||0);if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(n<10240?1:0)} KB`;return `${(n/(1024*1024)).toFixed(1)} MB`;}
-function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getStatisticsData:'Estadísticas',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
+function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
 function performanceCategoryClient_(action){const a=String(action||'');if(['syncCompetitionFromWeb','syncRefereeSource','syncAllFar','dailyFarSync','processCompetitionOfficialReports','refreshMatchReportOfficialData','refreshRefereeMatchOfficialDocument'].includes(a))return 'SYNC_EXTERNAL';if(/^(save|create|update|delete|remove|set|assign|mark|close|reopen|import)/i.test(a))return 'WRITE';return 'INTERACTIVE';}
 
 
@@ -315,7 +318,7 @@ async function call(action, payload = {}, fixedRequestId = null) {
       if (['AUTH_REQUIRED', 'INVALID_SESSION', 'SESSION_EXPIRED', 'ACCOUNT_DISABLED'].includes(error.code)) clearSession();
       throw error;
     }
-    if(/^(save|create|update|delete|set|upload|import|reprocess|apply|close|reopen|assign|cancel|end|generate|copy|refresh|sync|process)/i.test(String(action||''))){statisticsData=null;statisticsDataCacheKey='';statisticsDataCachedAt=0;}
+    if(/^(save|create|update|delete|set|upload|import|reprocess|apply|close|reopen|assign|cancel|end|generate|copy|refresh|sync|process)/i.test(String(action||''))){statisticsData=null;statisticsDataCacheKey='';statisticsDataCachedAt=0;refereeStatisticsData=null;refereeStatisticsDataCacheKey='';refereeStatisticsDataCachedAt=0;}
     return response;
   } catch(error) {
     if(!response)recordPerformanceMetric_(action,null,Math.max(0,performance.now()-perfStarted),false,error?.code||'TRANSPORT_ERROR');
@@ -349,6 +352,9 @@ function clearSession() {
   statisticsData = null;
   statisticsDataCacheKey = '';
   statisticsDataCachedAt = 0;
+  refereeStatisticsData = null;
+  refereeStatisticsDataCacheKey = '';
+  refereeStatisticsDataCachedAt = 0;
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
   clearBootstrapCache_();
 }
@@ -438,7 +444,7 @@ function resetContextScopedUi_(){
     peopleFilters:Object.assign({},ui.peopleFilters||{},{divisionId:div}),
     exerciseFilters:Object.assign({},ui.exerciseFilters||{},{divisionId:div})
   });
-  structureData=null;invalidateCalendarCaches_();statisticsData=null;trainingLibraryData=null;
+  structureData=null;invalidateCalendarCaches_();statisticsData=null;refereeStatisticsData=null;trainingLibraryData=null;
 }
 function currentAccessSummary_(){const ctx=currentRoleContext_();return ctx?.label||'Acceso personal';}
 async function refreshAccessProfileForSeason_(){
@@ -502,7 +508,7 @@ function seasonSwitcherMarkup_(){
 function resetSeasonScopedUi_(seasonId){
   const ui=loadUiState_(),calendar=Object.assign({},ui.calendarFilters||{},{divisionId:'',teamId:''}),statistics=Object.assign({},ui.statisticsFilters||{},{seasonId:seasonId||'',divisionId:'',teamId:''}),people=Object.assign({},ui.peopleFilters||{},{divisionId:''});
   saveUiStatePatch_({selectedSeasonId:seasonId||'',calendarFilters:calendar,statisticsFilters:statistics,peopleFilters:people});
-  structureData=null;invalidateCalendarCaches_();statisticsData=null;trainingLibraryData=null;
+  structureData=null;invalidateCalendarCaches_();statisticsData=null;refereeStatisticsData=null;trainingLibraryData=null;
 }
 function rerenderForSeason_(active){
   if(active==='home')return renderDashboard();
@@ -521,7 +527,7 @@ function navigationForRole() {
     if(key==='documents')return !!c.viewDocuments;
     if(key==='calendar')return !!c.viewCalendar;
     if(key==='exercises')return !!c.viewTrainingLibrary;
-    if(key==='statistics'){const role=currentRoleContext_().roleCategory;return !!c.viewStatistics&&['REFEREE_COORDINATOR','REFEREE','GUARDIAN','PERSONAL'].indexOf(role)<0;}
+    if(key==='statistics'){const role=String(currentRoleContext_().roleCategory||'').toUpperCase();return (!!c.viewStatistics&&['GUARDIAN','PERSONAL'].indexOf(role)<0)||['REFEREE_COORDINATOR','REFEREE'].includes(role)||!!p.isAdmin;}
     if(key==='settings')return !!p.isAdmin;
     return false;
   });
@@ -539,7 +545,7 @@ function dashboardCardsForRole() {
   if(c.viewCalendar)cards.push(['Actividad','Calendario deportivo','Entrenamientos, partidos, disponibilidad y convocatorias.','go-calendar','primary']);
   if(c.viewTrainingLibrary)cards.push(['Entrenamiento','Biblioteca de ejercicios','Ejercicios reutilizables, coaching points, material y variantes.','go-exercises','secondary']);
   if(c.viewStructure)cards.push(['Gestión','Estructura deportiva','Personas y organización dentro de tu alcance.','go-structure','secondary']);
-  if(c.viewStatistics)cards.push(['Rendimiento','Estadísticas','Asistencia, disponibilidad, convocatorias, participación y resultados.','go-statistics','secondary']);
+  {const role=String(currentRoleContext_().roleCategory||'').toUpperCase();if(['REFEREE','REFEREE_COORDINATOR'].includes(role))cards.push(['Rendimiento','Estadísticas arbitrales','Designaciones, ocupación, preparación y seguimiento de la temporada.','go-statistics','secondary']);else if(c.viewStatistics||p.isAdmin)cards.push(['Rendimiento','Estadísticas','Asistencia, disponibilidad, convocatorias, participación y resultados.','go-statistics','secondary']);}
   if(c.viewDocuments)cards.push(['Archivos','Documentación','Consultá tu documentación y la que tu rol permita gestionar.','go-documents','secondary']);
   if(p.isAdmin)cards.push(['Club','Configuración','Identidad, contacto, logo y colores del club.','go-settings','secondary']);
   return cards.map(c=>`<article class="quick-card role-card"><span class="eyebrow">${c[0]}</span><h2>${c[1]}</h2><p>${c[2]}</p><button class="button ${c[4]}" id="${c[3]}">${c[1]}</button></article>`).join('');
@@ -1867,9 +1873,62 @@ function wireStatsBody_(tab,data){
     ['stats-match-competition','stats-match-condition'].forEach(id=>document.getElementById(id)?.addEventListener('change',apply));document.getElementById('stats-match-search')?.addEventListener('input',apply);
   }
 }
+
+function refereeStatsOriginLabel_(origin){return String(origin||'').toUpperCase()==='FAR'?'FAR':'Club';}
+function refereeStatsStatusLabel_(row){if(row?.completed)return 'Realizado';const s=String(row?.status||'').toUpperCase();return s==='IN_PROGRESS'?'En curso':s==='CANCELLED'?'Cancelado':'Próximo';}
+function refereeStatsProfileLabel_(profile){const p=String(profile||'').toUpperCase();return p==='CLUB'?'Club / horario real':refereeOccupationProfileLabelClient_(p);}
+function refereeStatsSummaryHtml_(data){
+  const s=data.summary||{};
+  const monthly=(data.monthly||[]).slice(-6).map(m=>`<tr><td>${escapeHtml(m.label)}</td><td>${m.designations||0}</td><td>${m.far||0}</td><td>${m.club||0}</td><td>${escapeHtml(String(m.occupationHours||0))} h</td><td>${m.avgRating?escapeHtml(String(m.avgRating))+'/10':'—'}</td></tr>`).join('');
+  const cats=(data.categories||[]).slice(0,8).map(x=>`<tr><td>${escapeHtml(x.name)}</td><td>${x.count||0}</td></tr>`).join('');
+  return `<div class="stats-summary-grid"><article class="metric-card"><span>Designaciones</span><strong>${s.designations||0}</strong><small>${s.matchesCompleted||0} realizadas · ${s.upcoming||0} próximas</small></article><article class="metric-card"><span>Origen</span><strong>${s.far||0} FAR</strong><small>${s.club||0} internas</small></article><article class="metric-card"><span>Ocupación estimada</span><strong>${escapeHtml(String(s.occupationHours||0))} h</strong><small>Ventana completa de cada designación</small></article><article class="metric-card"><span>Seguimiento</span><strong>${escapeHtml(String(s.postRate||0))}%</strong><small>Post completado · Pre ${escapeHtml(String(s.preRate||0))}%</small></article><article class="metric-card"><span>Autoevaluación</span><strong>${s.avgRating?escapeHtml(String(s.avgRating))+'/10':'—'}</strong><small>Media de post-partido completados</small></article><article class="metric-card"><span>Conflictos</span><strong>${s.conflicts||0}</strong><small>Designaciones arbitrales solapadas</small></article></div><div class="form-grid two stats-dual-grid"><section class="panel inset"><div class="panel-heading"><div><h2>Evolución reciente</h2><p>Designaciones y dedicación por mes.</p></div></div>${monthly?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>Mes</th><th>Total</th><th>FAR</th><th>Club</th><th>Horas</th><th>Valoración</th></tr></thead><tbody>${monthly}</tbody></table></div>`:emptyTable('Sin actividad arbitral en el período.')}</section><section class="panel inset"><div class="panel-heading"><div><h2>Categorías</h2><p>Distribución de partidos arbitrados/designados.</p></div></div>${cats?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>Categoría / competición</th><th>Partidos</th></tr></thead><tbody>${cats}</tbody></table></div>`:emptyTable('Sin categorías registradas.')}</section></div>`;
+}
+function refereeStatsRefereeDetailHtml_(ref,selfOnly=false){
+  if(!ref)return emptyTable('Sin datos arbitrales.');
+  const assignments=(ref.assignments||[]).map(a=>`<tr class="clickable-row" data-ref-stats-event="${escapeHtml(a.eventId)}"><td>${escapeHtml(a.eventDate||'—')}<small>${escapeHtml(a.startTime||'')}</small></td><td><strong>${escapeHtml(a.title||'Partido')}</strong><small>${escapeHtml(a.category||'')}</small></td><td>${escapeHtml(refereeStatsOriginLabel_(a.origin))}<small>${escapeHtml(refereeStatsProfileLabel_(a.profile))}</small></td><td>${escapeHtml(String(a.occupationHours||0))} h</td><td>${a.preCompleted?'✓':'—'} / ${a.postCompleted?'✓':'—'}</td><td>${a.rating?escapeHtml(String(a.rating))+'/10':'—'}</td><td>${a.conflict?'<span class="status-pill warning">Conflicto</span>':escapeHtml(refereeStatsStatusLabel_(a))}</td></tr>`).join('');
+  const cats=Object.entries(ref.categories||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${escapeHtml(k)} (${v})`).join(' · ');
+  const focus=Object.entries(ref.focus||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${escapeHtml(k)} (${v})`).join(' · ');
+  return `<section class="stats-player-detail-card"><div class="panel-heading"><div><span class="eyebrow">${selfOnly?'Mi temporada arbitral':'Detalle de árbitro'}</span><h2>${escapeHtml(ref.displayName||'Árbitro')}</h2><p>${ref.designations||0} designaciones · ${escapeHtml(String(ref.occupationHours||0))} h estimadas.</p></div>${selfOnly?'':'<button class="button mini secondary" id="ref-stats-detail-close">Cerrar</button>'}</div><div class="stats-detail-kpis"><div><span>Realizados</span><strong>${ref.matchesCompleted||0}</strong></div><div><span>FAR / Club</span><strong>${ref.far||0} / ${ref.club||0}</strong></div><div><span>Pre</span><strong>${escapeHtml(String(ref.preRate||0))}%</strong></div><div><span>Post</span><strong>${escapeHtml(String(ref.postRate||0))}%</strong></div><div><span>Valoración</span><strong>${ref.avgRating?escapeHtml(String(ref.avgRating))+'/10':'—'}</strong></div><div><span>Conflictos</span><strong>${ref.conflicts||0}</strong></div></div>${cats?`<p><strong>Categorías:</strong> ${cats}</p>`:''}${focus?`<p><strong>Focos trabajados:</strong> ${focus}</p>`:''}${assignments?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>Fecha</th><th>Partido</th><th>Origen</th><th>Ocupación</th><th>Pre / Post</th><th>Valoración</th><th>Estado</th></tr></thead><tbody>${assignments}</tbody></table></div>`:emptyTable('Sin designaciones en el período.')}</section>`;
+}
+function refereeStatsRefereesHtml_(data){
+  if(data.access?.selfOnly)return refereeStatsRefereeDetailHtml_((data.referees||[])[0],true);
+  const rows=(data.referees||[]).filter(r=>r.designations>0).map(r=>`<tr class="clickable-row" data-ref-stats-person="${escapeHtml(r.personId)}"><td><strong>${escapeHtml(r.displayName)}</strong></td><td>${r.designations||0}</td><td>${r.far||0}</td><td>${r.club||0}</td><td>${escapeHtml(String(r.occupationHours||0))} h</td><td>${escapeHtml(String(r.preRate||0))}%</td><td>${escapeHtml(String(r.postRate||0))}%</td><td>${r.avgRating?escapeHtml(String(r.avgRating))+'/10':'—'}</td><td>${r.conflicts||0}</td></tr>`).join('');
+  return `<section class="panel"><div class="panel-heading"><div><h2>Árbitros</h2><p>Seleccioná una persona para consultar el detalle completo de la temporada.</p></div></div>${rows?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>Árbitro</th><th>Design.</th><th>FAR</th><th>Club</th><th>Horas</th><th>Pre</th><th>Post</th><th>Valoración</th><th>Conf.</th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('No hay designaciones arbitrales en el período.')}<div id="ref-stats-person-detail"></div></section>`;
+}
+function refereeStatsEvolutionHtml_(data){
+  const rows=(data.monthly||[]).map(m=>`<tr><td>${escapeHtml(m.label)}</td><td>${m.designations||0}</td><td>${m.far||0}</td><td>${m.club||0}</td><td>${escapeHtml(String(m.occupationHours||0))} h</td><td>${m.avgRating?escapeHtml(String(m.avgRating))+'/10':'—'}</td></tr>`).join('');
+  return `<section class="panel"><div class="panel-heading"><div><h2>Evolución mensual</h2><p>Actividad arbitral y dedicación estimada a lo largo de la temporada.</p></div></div>${rows?`<div class="table-wrap"><table class="stats-table"><thead><tr><th>Mes</th><th>Designaciones</th><th>FAR</th><th>Club</th><th>Ocupación</th><th>Valoración</th></tr></thead><tbody>${rows}</tbody></table></div>`:emptyTable('Sin actividad arbitral en el período.')}</section>`;
+}
+function refereeStatsFocusHtml_(data){
+  const focus=(data.focus||[]).map(x=>`<tr><td>${escapeHtml(x.name)}</td><td>${x.count||0}</td></tr>`).join('');
+  const cats=(data.categories||[]).map(x=>`<tr><td>${escapeHtml(x.name)}</td><td>${x.count||0}</td></tr>`).join('');
+  const profiles=(data.profiles||[]).map(x=>`<tr><td>${escapeHtml(refereeStatsProfileLabel_(x.name))}</td><td>${x.count||0}</td></tr>`).join('');
+  return `<div class="form-grid two stats-dual-grid"><section class="panel"><div class="panel-heading"><div><h2>Focos técnicos</h2><p>Temas seleccionados en los post-partido.</p></div></div>${focus?`<div class="table-wrap"><table><thead><tr><th>Foco</th><th>Veces</th></tr></thead><tbody>${focus}</tbody></table></div>`:emptyTable('Todavía no hay focos registrados.')}</section><section class="panel"><div class="panel-heading"><div><h2>Desplazamiento</h2><p>Perfil de ocupación utilizado en las designaciones.</p></div></div>${profiles?`<div class="table-wrap"><table><thead><tr><th>Perfil</th><th>Partidos</th></tr></thead><tbody>${profiles}</tbody></table></div>`:emptyTable('Sin perfiles registrados.')}</section></div><section class="panel"><div class="panel-heading"><div><h2>Categorías / competiciones</h2><p>Distribución de la temporada arbitral.</p></div></div>${cats?`<div class="table-wrap"><table><thead><tr><th>Categoría</th><th>Partidos</th></tr></thead><tbody>${cats}</tbody></table></div>`:emptyTable('Sin categorías registradas.')}</section>`;
+}
+function refereeStatsBody_(tab,data){if(tab==='referees')return refereeStatsRefereesHtml_(data);if(tab==='evolution')return refereeStatsEvolutionHtml_(data);if(tab==='focus')return refereeStatsFocusHtml_(data);return refereeStatsSummaryHtml_(data);}
+function wireRefereeStatsBody_(tab,data){
+  document.querySelectorAll('[data-ref-stats-event]').forEach(row=>row.onclick=()=>renderRefereeMatchWorkspace(row.dataset.refStatsEvent,'summary'));
+  document.querySelectorAll('[data-ref-stats-person]').forEach(row=>row.onclick=()=>{const ref=(data.referees||[]).find(x=>x.personId===row.dataset.refStatsPerson),host=document.getElementById('ref-stats-person-detail');if(!host||!ref)return;host.innerHTML=refereeStatsRefereeDetailHtml_(ref,false);host.scrollIntoView({behavior:'smooth',block:'start'});host.querySelector('#ref-stats-detail-close')?.addEventListener('click',()=>host.innerHTML='');host.querySelectorAll('[data-ref-stats-event]').forEach(x=>x.onclick=()=>renderRefereeMatchWorkspace(x.dataset.refStatsEvent,'summary'));});
+}
+async function renderRefereeStatistics(filters={}){
+  try{
+    const ui=loadUiState_(),previous=ui.refereeStatisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextRoleCategory:ctx.roleCategory||''});
+    const key=JSON.stringify(requested);let data=null;if(refereeStatisticsData&&refereeStatisticsDataCacheKey===key&&(Date.now()-refereeStatisticsDataCachedAt)<30000)data=refereeStatisticsData;else{const response=await call('getRefereeStatisticsData',requested);data=response.data;refereeStatisticsData=data;refereeStatisticsDataCacheKey=key;refereeStatisticsDataCachedAt=Date.now();}
+    const f=data.filters||{},activeTab=['summary','referees','evolution','focus'].includes(ui.refereeStatisticsTab)?ui.refereeStatisticsTab:'summary',tabs=[['summary','Resumen'],['referees',data.access?.selfOnly?'Mi temporada':'Árbitros'],['evolution','Evolución'],['focus','Focos']].map(([id,label])=>`<button type="button" class="stats-tab ${activeTab===id?'active':''}" data-ref-stats-tab="${id}">${label}</button>`).join('');
+    const refOptions=data.access?.canFilterReferee?`<option value="">Todos los árbitros</option>`+(data.refereeOptions||data.referees||[]).map(r=>`<option value="${escapeHtml(r.personId)}" ${f.personId===r.personId?'selected':''}>${escapeHtml(r.displayName)}</option>`).join(''):'';
+    shell(`<section class="hero compact"><span class="eyebrow">Área arbitral · Estadísticas</span><h1>Estadísticas arbitrales</h1><p>${data.access?.selfOnly?'Tus designaciones, dedicación y seguimiento durante la temporada.':'Designaciones FAR e internas, ocupación estimada y seguimiento de los árbitros del club.'}</p>${currentAccessProfile_().isAdmin?'<div class="button-row"><button class="button secondary" id="ref-stats-open-sport">Ver estadísticas deportivas</button></div>':''}</section><section class="panel stats-filter-panel"><div class="form-grid ${data.access?.canFilterReferee?'three':'two'}">${data.access?.canFilterReferee?`<label>Árbitro<select id="ref-stats-person">${refOptions}</select></label>`:''}<label>Desde<input id="ref-stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="ref-stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label></div><div class="button-row stats-filter-actions"><button class="button secondary" id="ref-stats-clear">Limpiar período</button></div></section><nav class="stats-tabs" aria-label="Secciones de estadísticas arbitrales">${tabs}</nav><div id="ref-stats-tab-host">${refereeStatsBody_(activeTab,data)}</div>`,'statistics');
+    document.getElementById('ref-stats-open-sport')?.addEventListener('click',()=>{saveUiStatePatch_({statisticsMode:'sport'});renderStatistics();});
+    const collect=()=>({seasonId:selectedSeasonId_(),personId:document.getElementById('ref-stats-person')?.value||'',fromDate:val('ref-stats-from'),toDate:val('ref-stats-to')});const reload=()=>{const next=collect();saveUiStatePatch_({refereeStatisticsFilters:next});renderRefereeStatistics(next);};
+    ['ref-stats-person','ref-stats-from','ref-stats-to'].forEach(id=>document.getElementById(id)?.addEventListener('change',reload));document.getElementById('ref-stats-clear')?.addEventListener('click',()=>{const next={seasonId:selectedSeasonId_(),personId:'',fromDate:'',toDate:''};saveUiStatePatch_({refereeStatisticsFilters:next});renderRefereeStatistics(next);});
+    document.querySelectorAll('[data-ref-stats-tab]').forEach(b=>b.onclick=()=>{saveUiStatePatch_({refereeStatisticsTab:b.dataset.refStatsTab});renderRefereeStatistics();});wireRefereeStatsBody_(activeTab,data);
+  }catch(err){shell(`<section class="panel narrow"><h1>No se pudieron cargar las estadísticas arbitrales</h1><p>${escapeHtml(userErrorText_(err))}</p><button class="button primary" id="ref-stats-retry">Reintentar</button></section>`,'statistics');document.getElementById('ref-stats-retry')?.addEventListener('click',()=>renderRefereeStatistics(filters));}
+}
+
 async function renderStatistics(filters={}){
   try{
-    const ui=loadUiState_(),previous=ui.statisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||''});requested.divisionId=contextScopedDivisionId_(requested.divisionId||'');
+    const preUi=loadUiState_(),preRole=String(currentRoleContext_().roleCategory||'').toUpperCase();
+    if(['REFEREE','REFEREE_COORDINATOR'].includes(preRole)||(currentAccessProfile_().isAdmin&&preUi.statisticsMode==='referee'))return renderRefereeStatistics(filters);
+    const ui=preUi,previous=ui.statisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||''});requested.divisionId=contextScopedDivisionId_(requested.divisionId||'');
     const statsKey=JSON.stringify(requested);let data=null;
     if(statisticsData&&statisticsDataCacheKey===statsKey&&(Date.now()-statisticsDataCachedAt)<30000)data=statisticsData;
     else{const response=await call('getStatisticsData',requested);data=response.data;statisticsData=data;statisticsDataCacheKey=statsKey;statisticsDataCachedAt=Date.now();}
@@ -1879,7 +1938,8 @@ async function renderStatistics(filters={}){
     const teamOptions=`<option value="">Todos los equipos</option>`+(data.teams||[]).filter(t=>!f.divisionId||t.divisionId===f.divisionId).map(t=>`<option value="${escapeHtml(t.teamId)}" ${f.teamId===t.teamId?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
     const tabLabels={summary:'Resumen',players:data.access?.selfOnly?'Mi temporada':'Jugadores',training:'Entrenamientos',matches:'Partidos',comparison:'Comparativa'};
     const tabs=allowedTabs.map(tab=>`<button type="button" class="stats-tab ${activeTab===tab?'active':''}" data-stats-tab="${tab}">${tabLabels[tab]}</button>`).join('');
-    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento · Estadísticas 2.0</span><h1>Estadísticas</h1><p>${data.access?.selfOnly?'Tu temporada deportiva, asistencia y participación real.':'Asistencia, disponibilidad, convocatorias, participación y resultados con trazabilidad.'}</p></section><section class="panel stats-filter-panel"><div class="form-grid four"><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label><label>Desde<input id="stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label></div><div class="button-row stats-filter-actions"><button class="button secondary" id="stats-clear">Limpiar período</button></div></section>${statsQualityMarkup_(data)}<nav class="stats-tabs" aria-label="Secciones de estadísticas">${tabs}</nav><div id="stats-tab-host">${statsTabBody_(activeTab,data,divMap,teamMap)}</div>`,'statistics');
+    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento · Estadísticas 2.0</span><h1>Estadísticas</h1><p>${data.access?.selfOnly?'Tu temporada deportiva, asistencia y participación real.':'Asistencia, disponibilidad, convocatorias, participación y resultados con trazabilidad.'}</p>${currentAccessProfile_().isAdmin?'<div class="button-row"><button class="button secondary" id="stats-open-referee">Ver estadísticas arbitrales</button></div>':''}</section><section class="panel stats-filter-panel"><div class="form-grid four"><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label><label>Desde<input id="stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label></div><div class="button-row stats-filter-actions"><button class="button secondary" id="stats-clear">Limpiar período</button></div></section>${statsQualityMarkup_(data)}<nav class="stats-tabs" aria-label="Secciones de estadísticas">${tabs}</nav><div id="stats-tab-host">${statsTabBody_(activeTab,data,divMap,teamMap)}</div>`,'statistics');
+    document.getElementById('stats-open-referee')?.addEventListener('click',()=>{saveUiStatePatch_({statisticsMode:'referee'});renderStatistics();});
     const collect=()=>({seasonId:selectedSeasonId_(),divisionId:val('stats-division'),teamId:val('stats-team'),fromDate:val('stats-from'),toDate:val('stats-to')});const reload=()=>{const next=collect();saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};
     ['stats-team','stats-from','stats-to'].forEach(id=>document.getElementById(id).onchange=reload);document.getElementById('stats-division').onchange=()=>{const next=collect();next.teamId='';saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};document.getElementById('stats-clear').onclick=()=>{const div=contextSingleDivisionId_();saveUiStatePatch_({statisticsFilters:{seasonId:selectedSeasonId_(),divisionId:div,teamId:'',fromDate:'',toDate:''}});renderStatistics({seasonId:selectedSeasonId_(),divisionId:div});};
     document.querySelectorAll('[data-stats-tab]').forEach(b=>b.onclick=()=>{saveUiStatePatch_({statisticsTab:b.dataset.statsTab});renderStatistics();});wireStatsBody_(activeTab,data);

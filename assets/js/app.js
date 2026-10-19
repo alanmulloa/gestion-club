@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.92';
+const FRONTEND_BUILD = '0.6.93';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');

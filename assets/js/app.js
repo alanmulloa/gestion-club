@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.87';
+const FRONTEND_BUILD = '0.6.88';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -2617,6 +2617,18 @@ function matchPresenceLabel_(stat,data){
   if(!summary)return '—';
   return `${summary.minutesPlayed} min`;
 }
+function matchPresenceSegmentsLabel_(stat,data){
+  const key=stat.personId||stat.licenseNumber||stat.jerseyNumber;
+  const summary=(data.presenceSummary||{})[key];
+  const duration=Number(data.matchDurationMinutes||0);
+  if(!summary||!Array.isArray(summary.segments)||!summary.segments.length)return '';
+  return summary.segments.map(seg=>{
+    const start=Number(seg.in||0);
+    const rawEnd=(seg.out===''||seg.out==null)?duration:Number(seg.out);
+    const end=Number.isFinite(rawEnd)&&rawEnd>=0?rawEnd:duration;
+    return `${start}–${end}`;
+  }).join(' · ');
+}
 function officialMatchSummaryHtml_(data,{compact=false}={}){
   const stats=uniqueBy_(data?.stats||[],x=>`${x.personId||x.licenseNumber||x.playerName}|${x.jerseyNumber}|${x.lineupRole}`), scores=uniqueBy_(data?.scoringEvents||[],x=>`${x.teamSide}|${x.jerseyNumber}|${x.eventType}|${x.minute}|${x.points}`), subs=uniqueBy_(data?.substitutionEvents||[],x=>`${x.teamSide}|${x.jerseyIn}|${x.jerseyOut}|${x.changeType}|${x.minute}`), cards=uniqueBy_(data?.disciplinaryEvents||[],x=>`${x.teamSide}|${x.jerseyNumber}|${x.cardType}|${x.reasonCode||''}|${x.minute}`), staff=uniqueBy_(data?.staffAppearances||[],x=>`${x.teamSide}|${x.personId||x.licenseNumber||x.staffName}|${x.staffRole}`);
   if(!stats.length&&!scores.length&&!subs.length&&!cards.length&&!staff.length)return '';
@@ -2630,8 +2642,8 @@ function officialMatchSummaryHtml_(data,{compact=false}={}){
   const subRows=subs.slice().sort((a,b)=>Number(a.minute||999)-Number(b.minute||999)).map(x=>`<li><span class="incident-minute">${escapeHtml(x.minute||'—')}'</span><strong>#${escapeHtml(x.jerseyIn||'—')} ${escapeHtml(x.playerInName||'')}</strong><span>entra por #${escapeHtml(x.jerseyOut||'—')} ${escapeHtml(x.playerOutName||'')} · ${escapeHtml(matchChangeTypeLabel_(x.changeType))}</span></li>`).join('');
   const cardRows=cards.slice().sort((a,b)=>Number(a.minute||999)-Number(b.minute||999)).map(x=>`<li><span class="incident-minute">${escapeHtml(x.minute||'—')}'</span><strong>#${escapeHtml(x.jerseyNumber||'—')} ${escapeHtml(x.playerName||'')}</strong><span>${x.cardType==='RED'?'Roja':'Amarilla'}${x.reasonCode?' · '+escapeHtml(x.reasonCode):''}</span></li>`).join('');
   const staffRows=staff.map(x=>`<li><strong>${escapeHtml(({COACH:'Entrenador',MANAGER:'Delegado',FIELD_DELEGATE:'Delegado de campo'})[x.staffRole]||x.staffRole||'Staff')}</strong><span>${escapeHtml(x.staffName||'—')}</span></li>`).join('');
-  const substituteCards=substitutes.map(s=>{const sub=subs.find(x=>String(x.jerseyIn||'')===String(s.jerseyNumber||''));return `<article class="squad-person-card"><div><strong>#${escapeHtml(s.jerseyNumber||'—')} ${escapeHtml(s.playerName||'')}</strong><small>${escapeHtml(s.licenseNumber||'')}${s.status==='UNMATCHED'?' · Sin vincular':''}</small></div><span class="badge ${sub?'':'muted'}">${sub?`Entró ${escapeHtml(sub.minute||'—')}'`:'No ingresó'}</span></article>`}).join('');
-  const starterRows=starters.map(s=>{const out=subs.find(x=>String(x.jerseyOut||'')===String(s.jerseyNumber||''));const cardCount=Number(s.yellowCards||0)+Number(s.redCards||0);return `<tr><td><strong>#${escapeHtml(s.jerseyNumber||'—')} ${escapeHtml(s.playerName||'')}</strong>${s.isCaptain==='TRUE'?'<span class="badge">Capitán</span>':''}<small>${escapeHtml(s.licenseNumber||'')}${s.status==='UNMATCHED'?' · Sin vincular':''}</small></td><td>${out?`${escapeHtml(out.minute||'—')}'`:'—'}</td><td>${escapeHtml(String(s.points||0))}</td><td>${cardCount?`${Number(s.yellowCards||0)?Number(s.yellowCards||0)+' A ':''}${Number(s.redCards||0)?Number(s.redCards||0)+' R':''}`:'—'}</td></tr>`}).join('');
+  const substituteCards=substitutes.map(s=>{const minutes=matchPresenceLabel_(s,data),segments=matchPresenceSegmentsLabel_(s,data),played=minutes!=='0 min'&&minutes!=='—';return `<article class="squad-person-card"><div><strong>#${escapeHtml(s.jerseyNumber||'—')} ${escapeHtml(s.playerName||'')}</strong><small>${escapeHtml(s.licenseNumber||'')}${s.status==='UNMATCHED'?' · Sin vincular':''}${segments?` · ${escapeHtml(segments)}`:''}</small></div><span class="badge ${played?'':'muted'}">${played?escapeHtml(minutes):'No ingresó'}</span></article>`}).join('');
+  const starterRows=starters.map(s=>{const cardCount=Number(s.yellowCards||0)+Number(s.redCards||0),segments=matchPresenceSegmentsLabel_(s,data);return `<tr><td><strong>#${escapeHtml(s.jerseyNumber||'—')} ${escapeHtml(s.playerName||'')}</strong>${s.isCaptain==='TRUE'?'<span class="badge">Capitán</span>':''}<small>${escapeHtml(s.licenseNumber||'')}${s.status==='UNMATCHED'?' · Sin vincular':''}${segments?` · ${escapeHtml(segments)}`:''}</small></td><td><strong>${escapeHtml(matchPresenceLabel_(s,data))}</strong></td><td>${escapeHtml(String(s.points||0))}</td><td>${cardCount?`${Number(s.yellowCards||0)?Number(s.yellowCards||0)+' A ':''}${Number(s.redCards||0)?Number(s.redCards||0)+' R':''}`:'—'}</td></tr>`}).join('');
   const sectionTitle=compact?'Resumen oficial del acta':'Resumen oficial de Marbella';
   return `<section class="official-match-summary ${compact?'compact':''}"><div class="section-heading"><h2>${sectionTitle}</h2><p>${stats.length} convocados · ${starters.length} titulares · ${substitutes.length} suplentes${captain?' · Capitán: '+escapeHtml(captain.playerName||''):''}${unmatchedPlayers?' · '+unmatchedPlayers+' sin vincular':''}</p></div>${unmatchedPlayers?`<div class="message warning"><strong>${unmatchedPlayers} jugador(es) del acta siguen sin vincular.</strong> El Resumen se aplica igualmente; un administrador puede resolver las coincidencias pendientes.</div>`:''}<div class="match-kpi-row"><div class="match-kpi"><strong>${points}</strong><span>Puntos</span></div><div class="match-kpi"><strong>${subs.length}</strong><span>Cambios</span></div><div class="match-kpi"><strong>${yellows}</strong><span>Amarillas</span></div><div class="match-kpi"><strong>${reds}</strong><span>Rojas</span></div></div>${compact?'':`<div class="official-roster-grid"><div><h3>Titulares</h3><div class="table-wrap compact-table"><table><thead><tr><th>Jugador</th><th>Minutos</th><th>Pts</th><th>Tarjetas</th></tr></thead><tbody>${starterRows||'<tr><td colspan="4">Sin titulares consolidados</td></tr>'}</tbody></table></div></div><div><h3>Suplentes</h3><div class="squad-card-list">${substituteCards||'<p>Sin suplentes consolidados.</p>'}</div></div></div>`}<div class="official-incidents-grid">${scoreRows?`<div><h3>Puntos</h3><ul class="incident-list">${scoreRows}</ul></div>`:''}${subRows?`<div><h3>Cambios</h3><ul class="incident-list">${subRows}</ul></div>`:''}${cardRows?`<div><h3>Disciplina</h3><ul class="incident-list">${cardRows}</ul></div>`:''}${staffRows&&!compact?`<div><h3>Staff</h3><ul class="incident-list">${staffRows}</ul></div>`:''}</div></section>`;
 }

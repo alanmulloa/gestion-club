@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.94';
+const FRONTEND_BUILD = '0.6.95';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -23,6 +23,7 @@ let familyData = null;
 let structureSection = 'people';
 let settingsSection = 'general';
 let dashboardNextRefreshTimer = null;
+let homeInteractiveMeta_ = null;
 let performanceFilterState_={version:'CURRENT',period:'TODAY'};
 const UI_STATE_KEY = 'gestionClub.uiState.v1';
 function loadUiState_(){try{return JSON.parse(sessionStorage.getItem(UI_STATE_KEY)||'{}')||{};}catch(_){return {};}}
@@ -66,8 +67,8 @@ function recordPerformanceMetric_(action,response,roundTripMs,success=true,trans
 }
 function performancePercentileClient_(values,pct){const nums=(values||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);if(!nums.length)return 0;return nums[Math.min(nums.length-1,Math.max(0,Math.ceil((pct/100)*nums.length)-1))];}
 function performanceFormatBytes_(bytes){const n=Number(bytes||0);if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(n<10240?1:0)} KB`;return `${(n/(1024*1024)).toFixed(1)} MB`;}
-function performancePhaseText_(phases){const p=phases&&typeof phases==='object'?phases:{};return ['AUTH_LOOKUP','AUTH_CRYPTO','SESSION_CREATE','BOOTSTRAP_READ','BOOTSTRAP_REBUILD'].filter(k=>Number(p[k]||0)>0).map(k=>`${k.replace('AUTH_','').replace('SESSION_','').replace('BOOTSTRAP_','BOOT ')} ${Math.round(Number(p[k]||0))} ms`).join(' · ');}
-function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getEventDetailHeaderData:'Cabecera de actividad',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSummaryFast:'Partido · Resumen',getMatchLineupFast:'Partido · Convocados',getMatchSurveyFast:'Partido · Encuesta',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',refreshMatchOfficialReport:'Acta FAR del partido',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
+function performancePhaseText_(phases){const p=phases&&typeof phases==='object'?phases:{},labels={AUTH_LOOKUP:'AUTH LOOKUP',AUTH_CRYPTO:'AUTH CRYPTO',SESSION_CREATE:'SESSION CREATE',BOOTSTRAP_READ:'BOOT READ',BOOTSTRAP_REBUILD:'BOOT REBUILD',SESSION:'SESSION',PERMISSIONS:'PERMISOS',DISPATCH:'DISPATCH',SNAPSHOT:'SNAPSHOT',SERIALIZE:'SERIALIZE'};return Object.keys(labels).filter(k=>Number(p[k]||0)>0).map(k=>`${labels[k]} ${Math.round(Number(p[k]||0))} ms`).join(' · ');}
+function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getHomeInteractiveData:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getEventDetailHeaderData:'Cabecera de actividad',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSummaryFast:'Partido · Resumen',getMatchLineupFast:'Partido · Convocados',getMatchSurveyFast:'Partido · Encuesta',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',refreshMatchOfficialReport:'Acta FAR del partido',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
 function performanceCategoryClient_(action){const a=String(action||'');if(['syncCompetitionFromWeb','syncRefereeSource','syncAllFar','dailyFarSync','processCompetitionOfficialReports','refreshMatchOfficialReport','refreshMatchReportOfficialData','refreshRefereeMatchOfficialDocument'].includes(a))return 'SYNC_EXTERNAL';if(/^(save|create|update|delete|remove|set|assign|mark|close|reopen|import|apply|reprocess|upload)/i.test(a))return 'WRITE';return 'INTERACTIVE';}
 
 
@@ -99,15 +100,14 @@ function refreshSimulationSelectOptions_(){
 }
 function scheduleRuntimeMaintenance_(){
   // 0.6.78: no se ejecutan migraciones ni mantenimiento pesado al iniciar sesión.
-  // Solo se difieren datos administrativos y se verifica/instala el trigger FAR.
+  // Solo se difieren datos administrativos que no son necesarios para pintar Inicio.
   if(!currentAccessProfile_().isAdmin||simulationActive_())return;
   try{if(sessionStorage.getItem(RUNTIME_MAINTENANCE_SESSION_KEY)==='DONE')return;}catch(_){}
   setTimeout(()=>{
     Promise.allSettled([
-      simulationCandidates.length?Promise.resolve(null):call('getSimulationCandidates').then(r=>{simulationCandidates=Array.isArray(r.data)?r.data:[];refreshSimulationSelectOptions_();}),
-      call('getFarSyncStatus')
+      simulationCandidates.length?Promise.resolve(null):call('getSimulationCandidates').then(r=>{simulationCandidates=Array.isArray(r.data)?r.data:[];refreshSimulationSelectOptions_();})
     ]).finally(()=>{try{sessionStorage.setItem(RUNTIME_MAINTENANCE_SESSION_KEY,'DONE');}catch(_){}});
-  },900);
+  },3000);
 }
 
 function renderStartupShell_(){
@@ -263,6 +263,7 @@ function serverApi(request) {
       : ['uploadMatchReport','reprocessMatchReport'].includes(action) ? 120000
       : action === 'getPerformanceData' ? 45000
       : action === 'getStatisticsData' ? 60000
+      : action === 'getHomeInteractiveData' ? 15000
       : action === 'getCalendarData' ? 45000
       : action === 'getCalendarListData' ? 20000
       : action === 'getMatchSectionState' ? 20000
@@ -294,7 +295,7 @@ function serverApi(request) {
 function realUserIsAdmin_(){return currentUser?.role==='ADMIN';}
 function simulationActive_(){return !!(simulationState&&simulationState.personId);}
 function simulationCanEnableActions_(){return String(config.environment||'').toUpperCase()==='DEV';}
-const SIMULATION_READ_ACTIONS_CLIENT = new Set(['logout','status','getAppBootstrap','getHomeDashboard','getAccessProfile','getClubConfig','getSeasonContext','getSeasonsData','getStructureData','getTrainingExercisesData','previewTrainingExerciseImport','getTrainingSessionPlanData','getFamilyData','getDocumentsData','getDocumentFile','getCalendarData','getCalendarListData','getEventDetailHeaderData','getRefereeCoordinationData','getEventAvailabilityData','getPersonAvailabilityData','getCompetitionsData','getRefereeSourcesData','getRefereeMatchWorkspaceData','getRefereeMatchDocumentFile','analyzeCompetitionSource','previewLeagueCalendarImport','getMatchPlanningData','getMatchSummaryFast','getMatchLineupFast','getMatchSurveyFast','getMatchSectionState','getMatchReportReview','getMatchReportFile','getMatchReportMaintenanceData','getStatisticsData','getRefereeStatisticsData']);
+const SIMULATION_READ_ACTIONS_CLIENT = new Set(['logout','status','getAppBootstrap','getHomeDashboard','getHomeInteractiveData','getAccessProfile','getClubConfig','getSeasonContext','getSeasonsData','getStructureData','getTrainingExercisesData','previewTrainingExerciseImport','getTrainingSessionPlanData','getFamilyData','getDocumentsData','getDocumentFile','getCalendarData','getCalendarListData','getEventDetailHeaderData','getRefereeCoordinationData','getEventAvailabilityData','getPersonAvailabilityData','getCompetitionsData','getRefereeSourcesData','getRefereeMatchWorkspaceData','getRefereeMatchDocumentFile','analyzeCompetitionSource','previewLeagueCalendarImport','getMatchPlanningData','getMatchSummaryFast','getMatchLineupFast','getMatchSurveyFast','getMatchSectionState','getMatchReportReview','getMatchReportFile','getMatchReportMaintenanceData','getStatisticsData','getRefereeStatisticsData']);
 function simulationActionIsReadOnlyClient_(action){return SIMULATION_READ_ACTIONS_CLIENT.has(String(action||''));}
 function simulationRequest_(){return simulationActive_()?{personId:simulationState.personId,allowActions:!!simulationState.allowActions}:{personId:'',allowActions:false};}
 function simulationCandidateById_(personId){return (simulationCandidates||[]).find(x=>String(x.personId||'')===String(personId||''))||null;}
@@ -740,7 +741,7 @@ async function renderDashboard() {
     <section class="panel"><div class="section-heading"><div><h2>Qué necesita tu atención</h2><p>Acciones detectadas automáticamente según tu rol y ámbito.</p></div></div><div id="dashboard-tasks"><div class="skeleton-block tall"></div></div></section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
   document.getElementById('dashboard-open-calendar').onclick=renderCalendar;
-  const load=async()=>{const refresh=document.getElementById('dashboard-refresh');if(refresh)refresh.disabled=true;try{const {data}=await call('getHomeDashboard',{seasonId:selectedSeasonId_(),roleCategory:role,divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''});const next=document.getElementById('dashboard-next'),week=document.getElementById('dashboard-week'),tasks=document.getElementById('dashboard-tasks'),summary=document.getElementById('dashboard-task-summary');if(next)next.innerHTML=dashboardEventCompactHtml_(data.nextEvent);if(week)week.innerHTML=dashboardWeekHtml_(data);if(tasks)tasks.innerHTML=dashboardTasksHtml_(data.tasks||[]);if(summary)summary.innerHTML=`<strong>${Number(data.taskCount||0)}</strong><span>${Number(data.taskCount||0)===1?'acción pendiente':'acciones / avisos pendientes'}</span>`;wireDashboardActions_();if(dashboardNextRefreshTimer){clearTimeout(dashboardNextRefreshTimer);dashboardNextRefreshTimer=null;}const refreshMs=Number(data.nextRefreshMs||0);if(refreshMs>0){dashboardNextRefreshTimer=setTimeout(()=>{dashboardNextRefreshTimer=null;if(document.getElementById('dashboard-next'))void load();},Math.min(refreshMs,2147480000));}}catch(error){showMessage(error.message,'error');const tasks=document.getElementById('dashboard-tasks');if(tasks)tasks.innerHTML='<div class="message error">No se pudieron cargar los pendientes.</div>';}finally{if(refresh)refresh.disabled=false;}};
+  const load=async()=>{const refresh=document.getElementById('dashboard-refresh');if(refresh)refresh.disabled=true;try{const {data:batch}=await call('getHomeInteractiveData',{seasonId:selectedSeasonId_(),roleCategory:role,divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''});const data=batch?.home||batch||{};homeInteractiveMeta_=batch||null;const next=document.getElementById('dashboard-next'),week=document.getElementById('dashboard-week'),tasks=document.getElementById('dashboard-tasks'),summary=document.getElementById('dashboard-task-summary');if(next)next.innerHTML=dashboardEventCompactHtml_(data.nextEvent);if(week)week.innerHTML=dashboardWeekHtml_(data);if(tasks)tasks.innerHTML=dashboardTasksHtml_(data.tasks||[]);if(summary)summary.innerHTML=`<strong>${Number(data.taskCount||0)}</strong><span>${Number(data.taskCount||0)===1?'acción pendiente':'acciones / avisos pendientes'}</span>`;wireDashboardActions_();if(dashboardNextRefreshTimer){clearTimeout(dashboardNextRefreshTimer);dashboardNextRefreshTimer=null;}const refreshMs=Number(data.nextRefreshMs||0);if(refreshMs>0){dashboardNextRefreshTimer=setTimeout(()=>{dashboardNextRefreshTimer=null;if(document.getElementById('dashboard-next'))void load();},Math.min(refreshMs,2147480000));}}catch(error){showMessage(error.message,'error');const tasks=document.getElementById('dashboard-tasks');if(tasks)tasks.innerHTML='<div class="message error">No se pudieron cargar los pendientes.</div>';}finally{if(refresh)refresh.disabled=false;}};
   document.getElementById('dashboard-refresh').onclick=load;
   void load();
 }
@@ -848,7 +849,7 @@ function renderPerformanceLocalPanel_(data){
   const allRows=performanceScopedRows_();
   const rows=allRows.filter(r=>String(r.category||performanceCategoryClient_(r.action))==='INTERACTIVE');
   const thresholds=remote.thresholds||{warningMs:1500,slowMs:2500,criticalMs:5000};
-  const targets=remote.targets||{eventShellMs:1500,matchSummaryHitMs:1500,availabilityHitMs:1500,homeHitMs:2000,calendarMs:3000,interactiveP95Ms:6000,snapshotHitPct:80,baseReadsOnHit:0};
+  const targets=remote.targets||{eventShellMs:1500,matchSummaryHitMs:1500,availabilityHitMs:1500,homeHitMs:1500,calendarMs:2000,statisticsHitMs:2000,bootstrapHitMs:2000,interactiveP95Ms:6000,snapshotHitPct:80,baseReadsOnHit:0};
   const durations=rows.map(r=>r.roundTripMs),p50=performancePercentileClient_(durations,50),p95=performancePercentileClient_(durations,95),avg=durations.length?Math.round(durations.reduce((a,b)=>a+b,0)/durations.length):0;
   const slowCount=rows.filter(r=>r.roundTripMs>=thresholds.slowMs).length,errors=rows.filter(r=>!r.success).length,ranking=performanceAggregateClient_(rows);
   const cacheHits=rows.reduce((a,r)=>a+Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0),0),cacheMisses=rows.reduce((a,r)=>a+Number(r.requestCacheMisses||0)+Number(r.scriptCacheMisses||0),0),cachePct=cacheHits+cacheMisses?Math.round(cacheHits*100/(cacheHits+cacheMisses)):0;
@@ -891,7 +892,7 @@ async function loadPerformancePanel_(){
 }
 async function runPerformanceDiagnostic_(){
   const button=document.getElementById('performance-diagnostic');if(button)button.disabled=true;showMessage('Ejecutando Mi semana, Calendario y Estadísticas…','info','performance-message');
-  const ctx=currentRoleContext_(),seasonId=selectedSeasonId_(),tests=[['getHomeDashboard',{seasonId,roleCategory:contextRoleCategory_(),divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''}],['getCalendarListData',Object.assign({seasonId},calendarVisibleRange_())],['getStatisticsData',{seasonId,contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||'',divisionId:contextSingleDivisionId_()||''}]];
+  const ctx=currentRoleContext_(),seasonId=selectedSeasonId_(),tests=[['getHomeInteractiveData',{seasonId,roleCategory:contextRoleCategory_(),divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''}],['getCalendarListData',Object.assign({seasonId},calendarVisibleRange_())],['getStatisticsData',{seasonId,contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||'',divisionId:contextSingleDivisionId_()||''}]];
   let ok=0;for(const [action,payload] of tests){try{await call(action,payload);ok++;}catch(_){}}
   showMessage(`Diagnóstico completado: ${ok}/${tests.length} operaciones respondieron correctamente.` ,ok===tests.length?'success':'warning','performance-message');if(button)button.disabled=false;await loadPerformancePanel_();
 }

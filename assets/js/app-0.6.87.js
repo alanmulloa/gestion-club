@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.86';
+const FRONTEND_BUILD = '0.6.87';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -58,7 +58,7 @@ function recordPerformanceMetric_(action,response,roundTripMs,success=true,trans
 }
 function performancePercentileClient_(values,pct){const nums=(values||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);if(!nums.length)return 0;return nums[Math.min(nums.length-1,Math.max(0,Math.ceil((pct/100)*nums.length)-1))];}
 function performanceFormatBytes_(bytes){const n=Number(bytes||0);if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(n<10240?1:0)} KB`;return `${(n/(1024*1024)).toFixed(1)} MB`;}
-function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',refreshMatchOfficialReport:'Acta FAR del partido',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
+function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getEventDetailHeaderData:'Cabecera de actividad',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',refreshMatchOfficialReport:'Acta FAR del partido',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
 function performanceCategoryClient_(action){const a=String(action||'');if(['syncCompetitionFromWeb','syncRefereeSource','syncAllFar','dailyFarSync','processCompetitionOfficialReports','refreshMatchOfficialReport','refreshMatchReportOfficialData','refreshRefereeMatchOfficialDocument'].includes(a))return 'SYNC_EXTERNAL';if(/^(save|create|update|delete|remove|set|assign|mark|close|reopen|import)/i.test(a))return 'WRITE';return 'INTERACTIVE';}
 
 
@@ -2456,10 +2456,19 @@ async function renderRefereeMatchWorkspace(eventId,requestedSection='summary'){
 }
 
 async function renderEventDetail(eventId,requestedSection=''){
-  if(!calendarData||Date.now()-calendarDataLoadedAt_>20000||!Array.isArray(calendarData.persons)||!(calendarData.events||[]).some(x=>x.eventId===eventId)){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;calendarDataLoadedAt_=Date.now();}
-  const d=calendarData,e=d.events.find(x=>x.eventId===eventId);if(!e)return renderCalendar();
-  if(e.eventType==='MATCH'&&(isExternalRefereeMatchClient_(e)||shouldUseRefereeWorkspaceClient_(e,d))){const refSection=['pre','post','documents','links','summary'].includes(requestedSection)?requestedSection:'summary';return renderRefereeMatchWorkspace(eventId,refSection);}
+  let d=calendarData,e=d?.events?.find(x=>x.eventId===eventId)||null,detailHeader=null;
+  const fullCalendarReady=!!(d&&Date.now()-calendarDataLoadedAt_<=20000&&Array.isArray(d.persons)&&e);
+  // 0.6.87: al abrir un partido pedimos primero sólo su cabecera. Así evitamos
+  // descargar personas, roles, asignaciones y toda la temporada para decidir
+  // si corresponde ficha deportiva o arbitral.
+  if(!fullCalendarReady){
+    try{detailHeader=(await call('getEventDetailHeaderData',{eventId})).data;e=detailHeader.event;}catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar la actividad</h1><p>${escapeHtml(userErrorText_(err))}</p><button class="button secondary" id="event-fast-error-back">Volver</button></section>`,'calendar');document.getElementById('event-fast-error-back')?.addEventListener('click',renderCalendar);return;}
+  }
+  if(!e)return renderCalendar();
   if(e.eventType==='MATCH'){
+    const role=contextRoleCategory_().toUpperCase(),hasClubReferee=detailHeader?!!detailHeader.hasClubReferee:eventHasClubRefereeClient_(eventId,d);
+    const refereeView=isExternalRefereeMatchClient_(e)||(hasClubReferee&&(role==='REFEREE_COORDINATOR'||(role==='REFEREE'&&contextEventIds_().includes(String(eventId||'')))));
+    if(refereeView){const refSection=['pre','post','documents','links','summary'].includes(requestedSection)?requestedSection:'summary';return renderRefereeMatchWorkspace(eventId,refSection);}
     if(requestedSection&&requestedSection!=='availability')return renderMatchPlanning(eventId,requestedSection);
     if(requestedSection==='availability')return renderEventAvailability(eventId);
     try{
@@ -2469,6 +2478,7 @@ async function renderEventDetail(eventId,requestedSection=''){
       return renderEventAvailability(eventId);
     }catch(_){return renderEventAvailability(eventId);}
   }
+  if(!fullCalendarReady){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;calendarDataLoadedAt_=Date.now();d=calendarData;e=(d.events||[]).find(x=>x.eventId===eventId);if(!e)return renderCalendar();}
   const persons={};(d.persons||[]).forEach(p=>persons[p.personId]=p);const parts=(d.participants||[]).filter(p=>p.eventId===eventId);
   const canEdit=d.canCreate&&['ADMIN','MANAGER','COACH'].includes(currentUser?.role);const meta=(d.leagueMeta||[]).find(m=>m.eventId===eventId);const reportProtected=(d.matchReportEventIds||[]).includes(eventId);
   if(e.eventType==='TRAINING'){
@@ -2660,10 +2670,13 @@ function matchParticipationBlockHtml_(data){
 }
 
 const matchPlanningCache_=new Map();
-function invalidateMatchPlanningCache_(eventId){if(eventId)matchPlanningCache_.delete(eventId);else matchPlanningCache_.clear();}
-async function getMatchPlanningCached_(eventId,force=false){
-  const now=Date.now(),hit=matchPlanningCache_.get(eventId);if(!force&&hit&&now-hit.at<15000)return hit.data;
-  const {data}=await call('getMatchPlanningData',{eventId});matchPlanningCache_.set(eventId,{at:now,data});return data;
+function invalidateMatchPlanningCache_(eventId){
+  if(!eventId){matchPlanningCache_.clear();return;}
+  const prefix=String(eventId)+'|';[...matchPlanningCache_.keys()].forEach(k=>{if(String(k).startsWith(prefix))matchPlanningCache_.delete(k);});
+}
+async function getMatchPlanningCached_(eventId,section='summary',force=false){
+  const key=String(eventId)+'|'+String(section||'summary'),now=Date.now(),hit=matchPlanningCache_.get(key);if(!force&&hit&&now-hit.at<30000)return hit.data;
+  const {data}=await call('getMatchPlanningData',{eventId,section});matchPlanningCache_.set(key,{at:now,data});return data;
 }
 function matchSummaryExistsClient_(data){
   const e=data?.event||{},after=['IN_PROGRESS','COMPLETED'].includes(String(e.status||''));
@@ -2681,6 +2694,17 @@ function officialReportUiState_(data){
   if(String(e.officialReportUrl||''))return {code:'AVAILABLE',label:'Disponible en FAR',kind:'warning',text:'FAR ya publica un acta para este partido. Podés descargarla y procesarla ahora.'};
   if(String(e.matchType||'').toUpperCase()==='COMPETITION'&&(e.competitionId||e.officialMatchUrl||String(e.sourceType||'').indexOf('FAR')===0))return {code:'PENDING',label:'Pendiente FAR',kind:'muted',text:'FAR todavía no publicó o no detectamos el acta. La sincronización diaria volverá a comprobarla.'};
   return {code:'MANUAL',label:'Sin acta',kind:'muted',text:'No hay acta asociada. Podés adjuntar el PDF manualmente.'};
+}
+async function recoverMatchReportOperation_(eventId,error){
+  // 0.6.87: si Apps Script devuelve un error después del commit (por ejemplo,
+  // telemetría/auditoría), verificamos el estado autoritativo antes de decirle
+  // al usuario que el procesamiento falló.
+  invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();
+  try{
+    const data=await getMatchPlanningCached_(eventId,'summary',true),state=officialReportUiState_(data);
+    if(state.code==='PROCESSED'){showToast_('Acta procesada y aplicada. Una operación secundaria no pudo confirmarse, pero los datos quedaron guardados.','warning',5200);await renderMatchPlanning(eventId,'summary');return true;}
+  }catch(recoveryError){console.warn('No se pudo verificar el estado del acta tras el error.',recoveryError);}
+  showMessage(userErrorText_(error),'error');return false;
 }
 function eventWorkspaceTabsHtml_(event,active,opts={}){
   const e=event||{},match=e.eventType==='MATCH',training=e.eventType==='TRAINING';
@@ -2711,10 +2735,16 @@ function wireEventWorkspaceTabs_(eventId,event,opts={}){
 }
 async function renderMatchPlanning(eventId,requestedSection='auto'){
   try{
-    const data=await getMatchPlanningCached_(eventId);const e=data.event,lineMap={};(data.lineup||[]).forEach(l=>lineMap[l.personId]=l);
-    const summaryExists=matchSummaryExistsClient_(data),summaryVisible=matchSummaryVisibleClient_(data),lineupExists=(data.lineup||[]).length>0;
-    let section=requestedSection||'auto';if(section==='auto')section=summaryVisible?'summary':lineupExists?'convocados':'availability';
+    let section=requestedSection||'auto';
+    // 0.6.87: primero decide qué pestaña necesita y sólo después solicita sus
+    // datos. Abrir Resumen ya no carga disponibilidad/roster/partido anterior.
+    if(section==='auto'){
+      const {data:state}=await call('getMatchSectionState',{eventId});
+      section=(state.summaryVisible||state.summaryExists)?'summary':Number(state.lineupCount||0)>0?'convocados':'availability';
+    }
     if(section==='availability')return renderEventAvailability(eventId);
+    const data=await getMatchPlanningCached_(eventId,section);const e=data.event,lineMap={};(data.lineup||[]).forEach(l=>lineMap[l.personId]=l);
+    const summaryExists=matchSummaryExistsClient_(data),summaryVisible=matchSummaryVisibleClient_(data),lineupExists=(data.lineup||[]).length>0;
     const previousMap={};(data.previousLineup||[]).forEach(l=>previousMap[l.personId]=l);
     const hasPrevious=data.canEditLineup&&(data.previousLineup||[]).length>0;
     const usePrevious=hasPrevious&&(data.lineup||[]).length===0;
@@ -2732,7 +2762,7 @@ async function renderMatchPlanning(eventId,requestedSection='auto'){
     const reportSummary=(data.reports||[]).length?`PDF cargado · ${escapeHtml(reportStatusLabel_((data.reports||[])[0]?.status))}`:'Pendiente';
     const reportUi=officialReportUiState_(data),farMatch=String(e.matchType||'').toUpperCase()==='COMPETITION'&&(e.competitionId||e.officialMatchUrl||String(e.sourceType||'').indexOf('FAR')===0);
     const farRefreshButton=farMatch&&data.canManageReport?`<button class="button primary" id="refresh-match-report-far">Actualizar desde FAR</button>`:'';
-    const reportBlock=data.canManageReport?`<div class="section-divider"></div><section class="official-report-status"><div class="panel-heading"><div><span class="eyebrow">Acta oficial</span><h2>Acta del partido</h2><p>${escapeHtml(reportUi.text)}</p></div><span class="status-pill ${escapeHtml(reportUi.kind)}">${escapeHtml(reportUi.label)}</span></div><div class="button-row">${farRefreshButton}</div><details class="official-report-details" ${reportUi.code==='PROCESSED'?'':'open'}><summary><span>Documento / carga manual</span><small>${reportSummary}</small></summary><div class="official-report-details-body"><p>La sincronización FAR es automática. La carga manual queda disponible como respaldo si el PDF todavía no se detectó o si necesitás reemplazarlo.</p><form id="report-form" class="form-grid two"><label>Acta PDF<input id="report-file" type="file" accept="application/pdf,.pdf" required></label><div><button class="button secondary" type="submit">${(data.reports||[]).length?'Reemplazar / subir acta':'Adjuntar acta PDF'}</button></div></form>${reports?`<ul class="file-list">${reports}</ul>`:''}<div id="report-review-panel"></div></div></details></section>`:'';
+    const reportBlock=data.canManageReport?`<div class="section-divider"></div><section class="official-report-status"><div class="panel-heading"><div><span class="eyebrow">Acta oficial</span><h2>Acta del partido</h2><p>${escapeHtml(reportUi.text)}</p></div><span class="status-pill ${escapeHtml(reportUi.kind)}">${escapeHtml(reportUi.label)}</span></div><div class="button-row">${farRefreshButton}</div><details class="official-report-details" ${reportUi.code==='PROCESSED'?'':'open'}><summary><span>Documento / carga manual</span><small>${reportSummary}</small></summary><div class="official-report-details-body"><p>La sincronización FAR es automática. La carga manual queda disponible como respaldo si el PDF todavía no se detectó o si necesitás reemplazarlo.</p><form id="report-form" class="form-grid two"><label>Acta PDF<input id="report-file" type="file" accept="application/pdf,.pdf" required></label><div><button class="button secondary" type="submit">${(data.reports||[]).length?'Reemplazar / subir acta':'Adjuntar acta PDF'}</button></div></form>${reports?`<ul class="file-list">${reports}</ul>`:''}<div id="match-report-operation-status" class="message"></div><div id="report-review-panel"></div></div></details></section>`:'';
     const starterStats=(data.stats||[]).filter(s=>s.lineupRole==='STARTER');
     const advancedRows=starterStats.map(s=>`<tr data-stat-row><td><strong>${escapeHtml(s.playerName||'Sin identificar')}</strong><small>#${escapeHtml(s.jerseyNumber||'—')} · ${escapeHtml(s.licenseNumber||'')}${s.isCaptain==='TRUE'?' · Capitán':''}</small><input type="hidden" data-stat-field="isCaptain" value="${escapeHtml(s.isCaptain||'FALSE')}"><input type="hidden" data-stat-field="personId" value="${escapeHtml(s.personId||'')}"><input type="hidden" data-stat-field="playerName" value="${escapeHtml(s.playerName||'')}"><input type="hidden" data-stat-field="licenseNumber" value="${escapeHtml(s.licenseNumber||'')}"><input type="hidden" data-stat-field="jerseyNumber" value="${escapeHtml(s.jerseyNumber||'')}"><input type="hidden" data-stat-field="lineupRole" value="STARTER"></td><td>${escapeHtml(matchPresenceLabel_(s,data))}</td><td><input class="stat-mini" data-stat-field="tries" type="number" min="0" value="${escapeHtml(s.tries||'0')}"></td><td><input class="stat-mini" data-stat-field="conversions" type="number" min="0" value="${escapeHtml(s.conversions||'0')}"></td><td><input class="stat-mini" data-stat-field="penalties" type="number" min="0" value="${escapeHtml(s.penalties||'0')}"></td><td><input class="stat-mini" data-stat-field="drops" type="number" min="0" value="${escapeHtml(s.drops||'0')}"></td><td><input class="stat-mini" data-stat-field="points" type="number" min="0" value="${escapeHtml(s.points||'0')}"></td><td><input class="stat-mini" data-stat-field="yellowCards" type="number" min="0" value="${escapeHtml(s.yellowCards||'0')}"></td><td><input class="stat-mini" data-stat-field="redCards" type="number" min="0" value="${escapeHtml(s.redCards||'0')}"></td></tr>`).join('');
     const statsBlock=(data.stats||[]).length?`${officialMatchSummaryHtml_(data)}${data.canManage&&advancedRows?`<details class="advanced-stats"><summary>Correcciones avanzadas de titulares</summary><p>Usá esta tabla solo si necesitás corregir manualmente los totales consolidados del acta.</p><div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Minutos</th><th>E</th><th>T</th><th>PC</th><th>D</th><th>Pts</th><th>Amar.</th><th>Rojas</th></tr></thead><tbody>${advancedRows}</tbody></table></div><button class="button secondary" id="save-match-stats">Guardar correcciones</button></details>`:''}`:'';
@@ -2756,10 +2786,10 @@ async function renderMatchPlanning(eventId,requestedSection='auto'){
     const confirmParticipation=document.getElementById('confirm-match-participation');if(confirmParticipation)confirmParticipation.onclick=async()=>{try{await call('saveMatchParticipationBatch',{eventId,participation:participationPayload_(),confirm:true});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();showToast_('Participación confirmada.');await renderMatchPlanning(eventId,'summary');}catch(err){showMessage(err.message,'error');}};
     const reopenParticipation=document.getElementById('reopen-match-participation');if(reopenParticipation)reopenParticipation.onclick=async()=>{if(!confirm('¿Reabrir la participación real?'))return;try{await call('reopenMatchParticipation',{eventId});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();await renderMatchPlanning(eventId,'summary');}catch(err){showMessage(err.message,'error');}};
     const ss=document.getElementById('save-match-stats');if(ss)ss.onclick=async()=>showMessage('Las correcciones manuales de totales se deshabilitaron temporalmente para no eliminar suplentes. Las incidencias del acta son la fuente de verdad.','warning');
-    const farRefresh=document.getElementById('refresh-match-report-far');if(farRefresh)farRefresh.onclick=async()=>{farRefresh.disabled=true;try{const {data:r}=await call('refreshMatchOfficialReport',{eventId});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();if(r.status==='PENDING')showToast_(r.message||'FAR todavía no publicó el acta.','warning',3200);else if(r.status==='ALREADY_PROCESSED')showToast_(r.message||'El acta oficial ya estaba procesada.','success',2800);else if(r.status==='REVIEW')showToast_(r.message||'Acta descargada; requiere revisión.','warning',3600);else showToast_(r.message||'Acta FAR actualizada, vinculada y aplicada al Resumen.','success',3600);await renderMatchPlanning(eventId,'summary');}catch(err){showMessage(userErrorText_(err),'error');}finally{farRefresh.disabled=false;}};
-    const rf=document.getElementById('report-form');if(rf)rf.onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('report-file').files?.[0];if(!f)return;let uploaded=false,result=null;const localBusy=beginUiBusy_('Leyendo PDF…');try{const dataUrl=await fileToDataUrl(f);let nativeText='';try{nativeText=await extractNativePdfText_(f);}catch(ignore){}endUiBusy_(localBusy);result=(await call('uploadMatchReport',{eventId,fileDataUrl:dataUrl,originalName:f.name,sourceText:nativeText})).data;uploaded=true;invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();const msg=result?.autoApplied?`Acta procesada y aplicada al Resumen.${result.createdPlayers?` ${result.createdPlayers} jugador(es) nuevo(s) creado(s) y vinculado(s).`:''}${result.unmatchedPlayers?` ${result.unmatchedPlayers} pendiente(s) de vincular.`:''}`:'Acta guardada; requiere revisión antes de completar el Resumen.';showToast_(msg,result?.autoApplied?'success':'warning',3600);}catch(err){endUiBusy_(localBusy);showMessage(userErrorText_(err),'error');return;}if(uploaded)await renderMatchPlanning(eventId,'summary');};
+    const farRefresh=document.getElementById('refresh-match-report-far');if(farRefresh)farRefresh.onclick=async()=>{farRefresh.disabled=true;showMessage('1/4 Consultando FAR y descargando acta…','info','match-report-operation-status');try{const {data:r}=await call('refreshMatchOfficialReport',{eventId});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();if(r.status==='PENDING')showToast_(r.message||'FAR todavía no publicó el acta.','warning',3200);else if(r.status==='ALREADY_PROCESSED')showToast_(r.message||'El acta oficial ya estaba procesada.','success',2800);else if(r.status==='REVIEW')showToast_(r.message||'Acta descargada; requiere revisión.','warning',3600);else showToast_(r.message||'Acta FAR actualizada, vinculada y aplicada al Resumen.','success',3600);await renderMatchPlanning(eventId,'summary');}catch(err){await recoverMatchReportOperation_(eventId,err);}finally{farRefresh.disabled=false;}};
+    const rf=document.getElementById('report-form');if(rf)rf.onsubmit=async ev=>{ev.preventDefault();const f=document.getElementById('report-file').files?.[0];if(!f)return;let uploaded=false,result=null;const localBusy=beginUiBusy_('Leyendo PDF…');try{const dataUrl=await fileToDataUrl(f);let nativeText='';try{nativeText=await extractNativePdfText_(f);}catch(ignore){}endUiBusy_(localBusy);result=(await call('uploadMatchReport',{eventId,fileDataUrl:dataUrl,originalName:f.name,sourceText:nativeText})).data;uploaded=true;invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();const msg=result?.autoApplied?`Acta procesada y aplicada al Resumen.${result.createdPlayers?` ${result.createdPlayers} jugador(es) nuevo(s) creado(s) y vinculado(s).`:''}${result.unmatchedPlayers?` ${result.unmatchedPlayers} pendiente(s) de vincular.`:''}`:'Acta guardada; requiere revisión antes de completar el Resumen.';showToast_(msg,result?.autoApplied?'success':'warning',3600);}catch(err){endUiBusy_(localBusy);await recoverMatchReportOperation_(eventId,err);return;}if(uploaded)await renderMatchPlanning(eventId,'summary');};
     document.querySelectorAll('[data-report-view]').forEach(b=>b.onclick=async()=>{try{const {data:f}=await call('getMatchReportFile',{reportId:b.dataset.reportView});const w=window.open();if(w)w.document.write(`<iframe src="${f.dataUrl}" style="border:0;width:100%;height:100vh"></iframe>`);}catch(err){showMessage(userErrorText_(err),'error');}});
-    document.querySelectorAll('[data-report-refresh]').forEach(b=>b.onclick=async()=>{const btn=b;btn.disabled=true;const localBusy=beginUiBusy_('Leyendo y aplicando acta original…');try{let sourceText='';try{const {data:file}=await call('getMatchReportFile',{reportId:b.dataset.reportRefresh});if(file?.dataUrl)sourceText=await extractNativePdfText_(file.dataUrl);}catch(nativeErr){console.warn('No se pudo refrescar el texto nativo del PDF; se usará caché/OCR.',nativeErr);}endUiBusy_(localBusy);const {data:r}=await call('refreshMatchReportOfficialData',{reportId:b.dataset.reportRefresh,sourceText});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();if(r?.ok)showToast_(`Acta reprocesada y aplicada al Resumen sin crear duplicados.${r.createdPlayers?` ${r.createdPlayers} jugador(es) nuevo(s) vinculado(s).`:''}`,'success',3400);else showToast_('El acta requiere revisión antes de aplicarse.','warning',3400);await renderMatchPlanning(eventId,'summary');}catch(err){showMessage(userErrorText_(err),'error');}finally{endUiBusy_(localBusy);btn.disabled=false;}});
+    document.querySelectorAll('[data-report-refresh]').forEach(b=>b.onclick=async()=>{const btn=b;btn.disabled=true;const localBusy=beginUiBusy_('Leyendo y aplicando acta original…');try{let sourceText='';try{const {data:file}=await call('getMatchReportFile',{reportId:b.dataset.reportRefresh});if(file?.dataUrl)sourceText=await extractNativePdfText_(file.dataUrl);}catch(nativeErr){console.warn('No se pudo refrescar el texto nativo del PDF; se usará caché/OCR.',nativeErr);}endUiBusy_(localBusy);const {data:r}=await call('refreshMatchReportOfficialData',{reportId:b.dataset.reportRefresh,sourceText});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();if(r?.ok)showToast_(`Acta reprocesada y aplicada al Resumen sin crear duplicados.${r.createdPlayers?` ${r.createdPlayers} jugador(es) nuevo(s) vinculado(s).`:''}`,'success',3400);else showToast_('El acta requiere revisión antes de aplicarse.','warning',3400);await renderMatchPlanning(eventId,'summary');}catch(err){await recoverMatchReportOperation_(eventId,err);}finally{endUiBusy_(localBusy);btn.disabled=false;}});
     document.querySelectorAll('[data-report-people]').forEach(b=>b.onclick=()=>reviewAndCreateReportPeople(b.dataset.reportPeople,eventId));document.querySelectorAll('[data-report-apply]').forEach(b=>b.onclick=()=>reviewAndApplyReport(b.dataset.reportApply,eventId));
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar el partido</h1><p>${escapeHtml(err.message)}</p><button class="button secondary" id="match-error-back">Volver al calendario</button></section>`,'calendar');document.getElementById('match-error-back')?.addEventListener('click',renderCalendar);}
 }

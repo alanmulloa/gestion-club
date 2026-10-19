@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.96';
+const FRONTEND_BUILD = '0.6.97';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -68,7 +68,7 @@ function recordPerformanceMetric_(action,response,roundTripMs,success=true,trans
 function performancePercentileClient_(values,pct){const nums=(values||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);if(!nums.length)return 0;return nums[Math.min(nums.length-1,Math.max(0,Math.ceil((pct/100)*nums.length)-1))];}
 function performanceFormatBytes_(bytes){const n=Number(bytes||0);if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(n<10240?1:0)} KB`;return `${(n/(1024*1024)).toFixed(1)} MB`;}
 function performancePhaseText_(phases){const p=phases&&typeof phases==='object'?phases:{},labels={AUTH_LOOKUP:'AUTH LOOKUP',AUTH_CRYPTO:'AUTH CRYPTO',SESSION_CREATE:'SESSION CREATE',BOOTSTRAP_READ:'BOOT READ',BOOTSTRAP_REBUILD:'BOOT REBUILD',SESSION:'SESSION',PERMISSIONS:'PERMISOS',SNAPSHOT_CACHE:'SNAPSHOT CACHE',SNAPSHOT_STORE:'SNAPSHOT STORE',SNAPSHOT_BUILD:'SNAPSHOT BUILD',SNAPSHOT_READ:'SNAPSHOT READ',DISPATCH:'DISPATCH',SERIALIZE:'SERIALIZE'};return Object.keys(labels).filter(k=>Number(p[k]||0)>0).map(k=>`${labels[k]} ${Math.round(Number(p[k]||0))} ms`).join(' · ');}
-function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getHomeInteractiveData:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getEventDetailHeaderData:'Cabecera de actividad',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSummaryFast:'Partido · Resumen',getMatchLineupFast:'Partido · Convocados',getMatchSurveyFast:'Partido · Encuesta',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',refreshMatchOfficialReport:'Acta FAR del partido',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
+function performanceActionLabel_(action){return ({getHomeDashboard:'Mi semana',getHomeInteractiveData:'Mi semana',getCalendarListData:'Calendario',getCalendarData:'Detalle calendario',getEventDetailHeaderData:'Cabecera de actividad',getStatisticsData:'Estadísticas',getRefereeStatisticsData:'Estadísticas arbitrales',getTrainingExercisesData:'Ejercicios',getMatchPlanningData:'Partido',getMatchSummaryFast:'Partido · Resumen',getMatchLineupFast:'Partido · Convocados',getMatchSurveyFast:'Partido · Encuesta',getMatchShellData:'Partido · Shell',getTrainingAttendanceFast:'Asistencia · Shell',getMatchSectionState:'Sección de partido',getRefereeCoordinationData:'Coordinación árbitros',getRefereeMatchWorkspaceData:'Ficha arbitral',getStructureData:'Estructura',getCompetitionsData:'Competiciones',getRefereeSourcesData:'Fuentes FAR',syncAllFar:'Sincronización FAR completa',dailyFarSync:'Sincronización FAR automática',refreshMatchOfficialReport:'Acta FAR del partido',getAppBootstrap:'Inicio de sesión',status:'Estado técnico'})[action]||action||'Operación';}
 function performanceCategoryClient_(action){const a=String(action||'');if(['syncCompetitionFromWeb','syncRefereeSource','syncAllFar','dailyFarSync','processCompetitionOfficialReports','refreshMatchOfficialReport','refreshMatchReportOfficialData','refreshRefereeMatchOfficialDocument'].includes(a))return 'SYNC_EXTERNAL';if(/^(save|create|update|delete|remove|set|assign|mark|close|reopen|import|apply|reprocess|upload)/i.test(a))return 'WRITE';return 'INTERACTIVE';}
 function performanceLaneClient_(action,category){const a=String(action||''),c=String(category||performanceCategoryClient_(a));if(c==='WRITE'||c==='SYNC_EXTERNAL')return 'BACKGROUND';if(/^(getMatchReportFile|getRefereeMatchDocumentFile|getDocumentFile|getMatchReportMaintenanceData|getMatchReportReview|getFarSyncStatus|previewLeagueCalendarImport|previewTrainingExerciseImport|analyzeCompetitionSource|runTechnicalTest|runRuntimeMaintenance)$/.test(a))return 'BACKGROUND';return 'UI';}
 function performanceLaneLabel_(lane){return String(lane||'UI').toUpperCase()==='BACKGROUND'?'Proceso':'UI';}
@@ -298,7 +298,7 @@ function serverApi(request) {
 function realUserIsAdmin_(){return currentUser?.role==='ADMIN';}
 function simulationActive_(){return !!(simulationState&&simulationState.personId);}
 function simulationCanEnableActions_(){return String(config.environment||'').toUpperCase()==='DEV';}
-const SIMULATION_READ_ACTIONS_CLIENT = new Set(['logout','status','getAppBootstrap','getHomeDashboard','getHomeInteractiveData','getAccessProfile','getClubConfig','getSeasonContext','getSeasonsData','getStructureData','getTrainingExercisesData','previewTrainingExerciseImport','getTrainingSessionPlanData','getFamilyData','getDocumentsData','getDocumentFile','getCalendarData','getCalendarListData','getEventDetailHeaderData','getRefereeCoordinationData','getEventAvailabilityData','getPersonAvailabilityData','getCompetitionsData','getRefereeSourcesData','getRefereeMatchWorkspaceData','getRefereeMatchDocumentFile','analyzeCompetitionSource','previewLeagueCalendarImport','getMatchPlanningData','getMatchSummaryFast','getMatchLineupFast','getMatchSurveyFast','getMatchSectionState','getMatchReportReview','getMatchReportFile','getMatchReportMaintenanceData','getStatisticsData','getRefereeStatisticsData']);
+const SIMULATION_READ_ACTIONS_CLIENT = new Set(['logout','status','getAppBootstrap','getHomeDashboard','getHomeInteractiveData','getAccessProfile','getClubConfig','getSeasonContext','getSeasonsData','getStructureData','getTrainingExercisesData','previewTrainingExerciseImport','getTrainingSessionPlanData','getFamilyData','getDocumentsData','getDocumentFile','getCalendarData','getCalendarListData','getEventDetailHeaderData','getRefereeCoordinationData','getEventAvailabilityData','getPersonAvailabilityData','getCompetitionsData','getRefereeSourcesData','getRefereeMatchWorkspaceData','getRefereeMatchDocumentFile','analyzeCompetitionSource','previewLeagueCalendarImport','getMatchPlanningData','getMatchSummaryFast','getMatchLineupFast','getMatchSurveyFast','getMatchShellData','getTrainingAttendanceFast','getMatchSectionState','getMatchReportReview','getMatchReportFile','getMatchReportMaintenanceData','getStatisticsData','getRefereeStatisticsData']);
 function simulationActionIsReadOnlyClient_(action){return SIMULATION_READ_ACTIONS_CLIENT.has(String(action||''));}
 function simulationRequest_(){return simulationActive_()?{personId:simulationState.personId,allowActions:!!simulationState.allowActions}:{personId:'',allowActions:false};}
 function simulationCandidateById_(personId){return (simulationCandidates||[]).find(x=>String(x.personId||'')===String(personId||''))||null;}
@@ -827,7 +827,7 @@ async function loadFarSyncSystemStatus_(){
   }catch(error){host.innerHTML=`<div><strong>No se pudo comprobar la sincronización FAR</strong><br><small>${escapeHtml(error.message)}</small></div>`;if(button)button.disabled=false;}
 }
 
-function performancePanelMarkup_(){return `<section class="panel settings-section-panel performance-panel"><div class="panel-heading"><div><span class="eyebrow">Rendimiento</span><h2>Monitorización y optimización</h2><p>P95 separado para UI, procesos pesados y total, con HIT / MISS / STALE / REBUILD y detalle de runtime.</p></div><div class="button-row"><button class="button secondary" id="performance-refresh">Actualizar</button><button class="button primary" id="performance-diagnostic">Ejecutar diagnóstico</button></div></div><div class="filter-bar"><label>Versión<select id="performance-version-filter"><option value="CURRENT">Versión actual</option><option value="ALL">Todas</option></select></label><label>Período<select id="performance-period-filter"><option value="1H">Última hora</option><option value="TODAY" selected>Hoy</option><option value="7D">7 días</option></select></label></div><div id="performance-summary" class="performance-summary"><strong>Recopilando métricas…</strong><span>Un snapshot HIT correcto debe registrar 0 lecturas de tablas base.</span></div><div id="performance-kpis" class="performance-kpis"></div><div class="performance-two-col"><article><div class="section-heading"><div><h3>Operaciones más lentas</h3><p>UI y procesos separados, con P95, backend y NETWORK/OVERHEAD.</p></div></div><div id="performance-ranking"></div></article><article><div class="section-heading"><div><h3>Diagnóstico</h3><p>Alertas del hot path y objetivos de rendimiento.</p></div></div><div id="performance-recommendations"></div></article></div><div class="section-heading"><div><h3>Últimas llamadas</h3><p>Tipo UI/proceso, runtime, snapshot, lecturas base y payload.</p></div></div><div id="performance-recent"></div><details class="performance-central-log"><summary>Registro central de llamadas lentas / errores</summary><div id="performance-server-log"></div></details><div id="performance-message" class="message"></div></section>`;}
+function performancePanelMarkup_(){return `<section class="panel settings-section-panel performance-panel"><div class="panel-heading"><div><span class="eyebrow">Rendimiento</span><h2>Monitorización y optimización</h2><p>P95 separado para UI, procesos pesados y total, con HIT / MISS / STALE / REBUILD y detalle de runtime.</p></div><div class="button-row"><button class="button secondary" id="performance-refresh">Actualizar</button><button class="button primary" id="performance-diagnostic">Ejecutar diagnóstico</button></div></div><div class="filter-bar"><label>Versión<select id="performance-version-filter"><option value="CURRENT">Versión actual</option><option value="ALL">Todas</option></select></label><label>Período<select id="performance-period-filter"><option value="1H">Última hora</option><option value="TODAY" selected>Hoy</option><option value="7D">7 días</option></select></label></div><div id="performance-summary" class="performance-summary"><strong>Recopilando métricas…</strong><span>Un snapshot HIT correcto debe registrar 0 lecturas de tablas base.</span></div><div id="performance-kpis" class="performance-kpis"></div><div class="performance-two-col"><article><div class="section-heading"><div><h3>Operaciones más lentas</h3><p>UI y procesos separados, con P95, backend y NETWORK/OVERHEAD.</p></div></div><div id="performance-ranking"></div></article><article><div class="section-heading"><div><h3>Diagnóstico</h3><p>Alertas del hot path y objetivos de rendimiento.</p></div></div><div id="performance-recommendations"></div></article></div><div class="section-heading"><div><h3>Últimas llamadas</h3><p>Tipo UI/proceso, runtime, snapshot, lecturas base y payload.</p></div></div><div id="performance-recent"></div><div class="section-heading"><div><h3>Errores recientes</h3><p>Operación, fase y mensaje técnico para distinguir fallos reales de latencia.</p></div></div><div id="performance-errors"></div><details class="performance-central-log"><summary>Registro central de llamadas lentas / errores</summary><div id="performance-server-log"></div></details><div id="performance-message" class="message"></div></section>`;}
 function performanceScopedRows_(){
   const all=performanceHistory_().filter(r=>!['getPerformanceData'].includes(r.action)),f=performanceFilterState_||{version:'CURRENT',period:'TODAY'},now=Date.now();
   return all.filter(r=>{
@@ -852,7 +852,7 @@ function renderPerformanceLocalPanel_(data){
   const uiRows=allRows.filter(r=>String(r.lane||performanceLaneClient_(r.action,r.category||performanceCategoryClient_(r.action)))==='UI');
   const backgroundRows=allRows.filter(r=>String(r.lane||performanceLaneClient_(r.action,r.category||performanceCategoryClient_(r.action)))==='BACKGROUND');
   const thresholds=remote.thresholds||{warningMs:1500,slowMs:2500,criticalMs:5000};
-  const targets=remote.targets||{eventShellMs:1500,matchSummaryHitMs:1500,availabilityHitMs:1500,homeHitMs:1500,calendarMs:2000,statisticsHitMs:2000,bootstrapHitMs:2000,uiP95Ms:6000,interactiveP95Ms:6000,backgroundP95Ms:30000,snapshotHitPct:80,baseReadsOnHit:0};
+  const targets=remote.targets||{eventShellMs:1500,matchShellMs:1500,matchSummaryHitMs:1500,availabilityHitMs:1500,homeHitMs:1500,calendarMs:2000,statisticsHitMs:2000,bootstrapHitMs:2000,uiP95Ms:6000,interactiveP95Ms:6000,backgroundP95Ms:30000,snapshotHitPct:80,l1HitPct:80,baseReadsOnHit:0};
   const uiDurations=uiRows.map(r=>r.roundTripMs),backgroundDurations=backgroundRows.map(r=>r.roundTripMs),totalDurations=allRows.map(r=>r.roundTripMs),p50=performancePercentileClient_(uiDurations,50),uiP95=performancePercentileClient_(uiDurations,95),backgroundP95=performancePercentileClient_(backgroundDurations,95),totalP95=performancePercentileClient_(totalDurations,95),avg=uiDurations.length?Math.round(uiDurations.reduce((a,b)=>a+b,0)/uiDurations.length):0;
   const slowCount=uiRows.filter(r=>r.roundTripMs>=thresholds.slowMs).length,errors=allRows.filter(r=>!r.success).length,ranking=performanceAggregateClient_(allRows);
   const cacheHits=uiRows.reduce((a,r)=>a+Number(r.requestCacheHits||0)+Number(r.scriptCacheHits||0),0),cacheMisses=uiRows.reduce((a,r)=>a+Number(r.requestCacheMisses||0)+Number(r.scriptCacheMisses||0),0),cachePct=cacheHits+cacheMisses?Math.round(cacheHits*100/(cacheHits+cacheMisses)):0;
@@ -864,10 +864,11 @@ function renderPerformanceLocalPanel_(data){
   const transportAvg=uiRows.length?Math.round(uiRows.reduce((a,r)=>a+Number(r.transportMs||Math.max(0,Number(r.roundTripMs||0)-Number(r.serverMs||0))),0)/uiRows.length):0;
   const health=performanceHealthClass_(uiP95,thresholds),summary=document.getElementById('performance-summary'),snapshotHealthy=!snapshotSamples||snapshotPct>=Number(targets.snapshotHitPct||80),uiTarget=Number(targets.uiP95Ms||targets.interactiveP95Ms||6000);
   if(summary){summary.className=`performance-summary ${baseReadsOnHit?'critical':!snapshotHealthy?'warning':uiP95>=uiTarget?'critical':health}`;summary.innerHTML=`<strong>${uiRows.length?`Estado UI ${baseReadsOnHit?'con lecturas base':performanceHealthLabel_(uiP95,thresholds)}`:'Sin muestra UI suficiente'}</strong><span>${uiRows.length?`${uiRows.length} llamadas UI · P95 UI ${uiP95} ms · procesos P95 ${backgroundP95||0} ms · snapshot HIT ${snapshotPct}% · base en HIT ${baseReadsOnHit}`:'Ejecutá el diagnóstico o usá la plataforma para empezar a medir.'}</span>`;}
-  host.innerHTML=`<article><span>Promedio UI</span><strong>${avg} ms</strong><small>ida y vuelta</small></article><article><span>P50 UI</span><strong>${p50} ms</strong><small>mediana</small></article><article class="${uiP95>=uiTarget?'critical':performanceHealthClass_(uiP95,thresholds)}"><span>P95 UI</span><strong>${uiP95} ms</strong><small>objetivo &lt; ${uiTarget.toLocaleString('es-ES')} ms</small></article><article class="${backgroundP95>=Number(targets.backgroundP95Ms||30000)?'warning':''}"><span>P95 background</span><strong>${backgroundP95} ms</strong><small>${backgroundRows.length} procesos</small></article><article><span>P95 total</span><strong>${totalP95} ms</strong><small>UI + procesos</small></article><article><span>Network/overhead</span><strong>${transportAvg} ms</strong><small>media UI fuera del backend</small></article><article class="${snapshotSamples&&snapshotPct<Number(targets.snapshotHitPct||80)?'warning':''}"><span>Snapshot hit-rate</span><strong>${snapshotPct}%</strong><small>${snapshotHits} HIT / ${snapshotMisses} MISS / ${snapshotStales} STALE</small></article><article class="${baseReadsOnHit?'critical':'ok'}"><span>Base en snapshot HIT</span><strong>${baseReadsOnHit}</strong><small>objetivo: 0 lecturas</small></article><article><span>Lectura snapshot</span><strong>${snapshotReadAvg} ms</strong><small>media UI HIT/MISS/STALE</small></article><article class="${snapshotRebuildAvg>1500?'warning':''}"><span>Reconstrucción</span><strong>${snapshotRebuildAvg} ms</strong><small>${snapshotRebuilds} REBUILD</small></article><article><span>Caché UI</span><strong>${cachePct}%</strong><small>${cacheHits} hits / ${cacheMisses} misses</small></article><article><span>UI lentas</span><strong>${slowCount}</strong><small>≥ ${thresholds.slowMs} ms</small></article><article class="${errors?'warning':''}"><span>Errores</span><strong>${errors}</strong><small>UI + procesos</small></article>`;
+  host.innerHTML=`<article><span>Promedio UI</span><strong>${avg} ms</strong><small>ida y vuelta</small></article><article><span>P50 UI</span><strong>${p50} ms</strong><small>mediana</small></article><article class="${uiP95>=uiTarget?'critical':performanceHealthClass_(uiP95,thresholds)}"><span>P95 UI</span><strong>${uiP95} ms</strong><small>objetivo &lt; ${uiTarget.toLocaleString('es-ES')} ms</small></article><article class="${backgroundP95>=Number(targets.backgroundP95Ms||30000)?'warning':''}"><span>P95 background</span><strong>${backgroundP95} ms</strong><small>${backgroundRows.length} procesos</small></article><article><span>P95 total</span><strong>${totalP95} ms</strong><small>UI + procesos</small></article><article><span>Network/overhead</span><strong>${transportAvg} ms</strong><small>media UI fuera del backend</small></article><article class="${snapshotSamples&&snapshotPct<Number(targets.snapshotHitPct||80)?'warning':''}"><span>Snapshot hit-rate</span><strong>${snapshotPct}%</strong><small>${snapshotHits} HIT / ${snapshotMisses} MISS / ${snapshotStales} STALE</small></article><article class="${baseReadsOnHit?'critical':'ok'}"><span>Base en snapshot HIT</span><strong>${baseReadsOnHit}</strong><small>objetivo: 0 lecturas</small></article><article><span>Lectura snapshot</span><strong>${snapshotReadAvg} ms</strong><small>media UI HIT/MISS/STALE</small></article><article class="${snapshotRebuildAvg>1500?'warning':''}"><span>Reconstrucción</span><strong>${snapshotRebuildAvg} ms</strong><small>${snapshotRebuilds} REBUILD</small></article><article class="${cacheHits+cacheMisses&&cachePct<Number(targets.l1HitPct||80)?'warning':'ok'}"><span>Caché UI / L1</span><strong>${cachePct}%</strong><small>${cacheHits} hits / ${cacheMisses} misses · objetivo ≥ ${Number(targets.l1HitPct||80)}%</small></article><article><span>UI lentas</span><strong>${slowCount}</strong><small>≥ ${thresholds.slowMs} ms</small></article><article class="${errors?'warning':''}"><span>Errores</span><strong>${errors}</strong><small>UI + procesos</small></article>`;
   const rankHost=document.getElementById('performance-ranking');if(rankHost)rankHost.innerHTML=ranking.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Tipo</th><th>Operación</th><th>Llam.</th><th>Media</th><th>P95</th><th>Backend / overhead</th><th>Snapshot</th><th>Base</th><th>Sheets</th></tr></thead><tbody>${ranking.slice(0,12).map(r=>`<tr><td><span class="performance-pill ${r.lane==='UI'?'ok':''}">${escapeHtml(performanceLaneLabel_(r.lane))}</span></td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td>${r.count}</td><td>${r.avgMs} ms</td><td><span class="performance-pill ${r.lane==='UI'?performanceHealthClass_(r.p95Ms,thresholds):''}">${r.p95Ms} ms</span></td><td>${r.avgServerMs} / ${r.avgTransportMs} ms</td><td>${r.snapshotHitPct}%<small>${r.avgSnapshotReadMs} ms lectura</small></td><td>${r.avgBaseReads}</td><td>${r.avgSheetMs} ms</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';
   const rec=document.getElementById('performance-recommendations');if(rec){const active=remote.optimizations?.scriptCacheSheets||[];rec.innerHTML=`<div class="performance-recommendation-list">${performanceRecommendations_(uiRows,backgroundRows,thresholds,targets).map((x,i)=>`<article><span>${i+1}</span><p>${escapeHtml(x)}</p></article>`).join('')}</div>${performancePreviousVersionComparison_(uiRows,thresholds)}${remote.optimizations?.snapshotHotPath?`<div class="info-strip"><strong>Snapshot Hot Path activo.</strong> El semáforo usa sólo P95 UI; procesos pesados se muestran aparte. Objetivo HIT ≥ ${Number(remoteSnapshots.targetHitPct||80)}%.</div>`:active.length?`<div class="info-strip">Optimización activa: caché por petición + snapshots revisionados (${escapeHtml(String(remote.optimizations?.scriptCacheSeconds||''))}).</div>`:'<div class="info-strip">Métricas locales disponibles. Cargando información complementaria del backend…</div>'}`;}
   const recent=document.getElementById('performance-recent');if(recent){const recentRows=allRows.slice().sort((a,b)=>b.at-a.at).slice(0,24);recent.innerHTML=recentRows.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Tipo</th><th>Operación</th><th>Total</th><th>Snapshot</th><th>Base</th><th>Store</th><th>Sheets</th><th>Runtime</th><th>Payload</th></tr></thead><tbody>${recentRows.map(r=>{const state=String(r.snapshotState||'—').toUpperCase(),stateClass=state==='HIT'?'ok':state==='REBUILD'?'warning':state==='MISS'||state==='STALE'?'slow':'',lane=String(r.lane||performanceLaneClient_(r.action,r.category||performanceCategoryClient_(r.action)));return `<tr><td>${escapeHtml(formatAppDateTime_(new Date(r.at).toISOString()).slice(11))}</td><td><span class="performance-pill ${lane==='UI'?'ok':''}">${escapeHtml(performanceLaneLabel_(lane))}</span></td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td><span class="performance-pill ${lane==='UI'?performanceHealthClass_(r.roundTripMs,thresholds):''}">${r.roundTripMs} ms</span><small>backend ${Number(r.serverMs||0)} · overhead ${Number(r.transportMs||0)}</small></td><td><span class="performance-pill ${stateClass}">${escapeHtml(state)}</span><small>${escapeHtml(r.snapshotType||'')} · ${Number(r.snapshotReadMs||0)} / ${Number(r.snapshotRebuildMs||0)} ms</small></td><td>${Number(r.baseSheetReads||0)}</td><td>${Number(r.snapshotStoreReads||0)}</td><td>${Number(r.sheetReadMs||0)} ms</td><td><small>${escapeHtml(performanceRuntimeText_(r)||'—')}</small></td><td>${performanceFormatBytes_(r.payloadBytes)}</td></tr>`;}).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';}
+  const errorHost=document.getElementById('performance-errors');if(errorHost){const recentErrors=(remote.recentErrors||[]).slice(0,20);errorHost.innerHTML=recentErrors.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Tipo</th><th>Operación</th><th>Fase</th><th>Código</th><th>Mensaje</th><th>Backend</th></tr></thead><tbody>${recentErrors.map(r=>`<tr><td>${escapeHtml(formatAppDateTime_(r.occurredAt||new Date().toISOString()).slice(11))}</td><td>${escapeHtml(performanceLaneLabel_(r.lane||'UI'))}</td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action||'')}</small></td><td><span class="performance-pill warning">${escapeHtml(r.errorPhase||'DISPATCH')}</span></td><td>${escapeHtml(r.errorCode||'ERROR')}</td><td>${escapeHtml(r.errorMessage||'Sin detalle')}</td><td>${Number(r.serverMs||0)} ms</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No hay errores recientes registrados en esta versión.</div>';}
 }
 function renderPerformanceServerLog_(data,error){
   const server=document.getElementById('performance-server-log');if(!server)return;
@@ -2030,7 +2031,7 @@ async function renderStatistics(filters={}){
     if(['REFEREE','REFEREE_COORDINATOR'].includes(preRole)||(currentAccessProfile_().isAdmin&&preUi.statisticsMode==='referee'))return renderRefereeStatistics(filters);
     const ui=preUi,previous=ui.statisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||''});requested.divisionId=contextScopedDivisionId_(requested.divisionId||'');
     const statsKey=JSON.stringify(requested);let data=null;
-    if(statisticsData&&statisticsDataCacheKey===statsKey&&(Date.now()-statisticsDataCachedAt)<30000)data=statisticsData;
+    if(statisticsData&&statisticsDataCacheKey===statsKey&&(Date.now()-statisticsDataCachedAt)<120000)data=statisticsData;
     else{const response=await call('getStatisticsData',requested);data=response.data;statisticsData=data;statisticsDataCacheKey=statsKey;statisticsDataCachedAt=Date.now();}
     const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x])),teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x])),f=data.filters||{};
     let activeTab=ui.statisticsTab||'summary';const allowedTabs=['summary','players','training','matches'].concat(data.access?.canCompare?['comparison']:[]);if(!allowedTabs.includes(activeTab))activeTab='summary';
@@ -2080,7 +2081,7 @@ function calendarVisibleRange_(){
 async function renderCalendar(forceReload=false){
   const state=Object.assign({},loadUiState_().calendarFilters||{});state.divisionId=contextScopedDivisionId_(state.divisionId||'');
   const seasonId=selectedSeasonId_(),range=calendarVisibleRange_(),calendarCacheKey=[seasonId,calendarView,range.fromDate,range.toDate,contextRoleCategory_(),contextDivisionIds_().join(',')].join('|');let d=null;
-  if(!forceReload&&calendarListCache_&&calendarListCache_.key===calendarCacheKey&&(Date.now()-calendarListCache_.at)<30000)d=calendarListCache_.data;
+  if(!forceReload&&calendarListCache_&&calendarListCache_.key===calendarCacheKey&&(Date.now()-calendarListCache_.at)<120000)d=calendarListCache_.data;
   if(!d){try{const response=await call('getCalendarListData',{seasonId,fromDate:range.fromDate,toDate:range.toDate});d=response.data;calendarListCache_={key:calendarCacheKey,at:Date.now(),data:d};}catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p><button class="button primary" id="calendar-retry">Reintentar</button></section>`,'calendar');document.getElementById('calendar-retry')?.addEventListener('click',()=>renderCalendar(true));return;}}
   if(!calendarViewTouched&&loadUiState_().calendarView)calendarView=loadUiState_().calendarView;
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
@@ -2515,10 +2516,10 @@ async function renderRefereeMatchWorkspace(eventId,requestedSection='summary'){
 
 async function renderEventDetail(eventId,requestedSection=''){
   let d=calendarData,e=d?.events?.find(x=>x.eventId===eventId)||null,detailHeader=null;
-  const fullCalendarReady=!!(d&&Date.now()-calendarDataLoadedAt_<=20000&&Array.isArray(d.persons)&&e);
-  // 0.6.87: al abrir un partido pedimos primero sólo su cabecera. Así evitamos
-  // descargar personas, roles, asignaciones y toda la temporada para decidir
-  // si corresponde ficha deportiva o arbitral.
+  const fullCalendarReady=!!(d&&Date.now()-calendarDataLoadedAt_<=60000&&Array.isArray(d.persons)&&e);
+  // 0.6.97: la cabecera/shell del evento es la ruta primaria. El detalle completo
+  // de temporada queda fuera del hot path y sólo se solicita para actividades
+  // genéricas que todavía lo necesitan.
   if(!fullCalendarReady){
     try{detailHeader=(await call('getEventDetailHeaderData',{eventId})).data;e=detailHeader.event;}catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar la actividad</h1><p>${escapeHtml(userErrorText_(err))}</p><button class="button secondary" id="event-fast-error-back">Volver</button></section>`,'calendar');document.getElementById('event-fast-error-back')?.addEventListener('click',renderCalendar);return;}
   }
@@ -2527,29 +2528,28 @@ async function renderEventDetail(eventId,requestedSection=''){
     const role=contextRoleCategory_().toUpperCase(),hasClubReferee=detailHeader?!!detailHeader.hasClubReferee:eventHasClubRefereeClient_(eventId,d);
     const refereeView=isExternalRefereeMatchClient_(e)||(hasClubReferee&&(role==='REFEREE_COORDINATOR'||(role==='REFEREE'&&contextEventIds_().includes(String(eventId||'')))));
     if(refereeView){const refSection=['pre','post','documents','links','summary'].includes(requestedSection)?requestedSection:'summary';return renderRefereeMatchWorkspace(eventId,refSection);}
-    if(requestedSection&&requestedSection!=='availability')return renderMatchPlanning(eventId,requestedSection);
-    if(requestedSection==='availability')return renderEventAvailability(eventId);
-    try{
-      // 0.6.90: la cabecera rápida ya trae el estado mínimo del partido. Cuando
-      // abrimos desde Calendario evitamos una segunda llamada sólo para decidir
-      // qué pestaña mostrar.
-      const state=detailHeader?.matchState||(await call('getMatchSectionState',{eventId})).data;
-      if(state?.summaryVisible||state?.summaryExists)return renderMatchPlanning(eventId,'summary');
-      if(Number(state?.lineupCount||0)>0)return renderMatchPlanning(eventId,'convocados');
-      return renderEventAvailability(eventId);
-    }catch(_){return renderEventAvailability(eventId);}
+    return renderMatchPlanning(eventId,requestedSection||'auto',detailHeader);
   }
-  if(!fullCalendarReady){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;calendarDataLoadedAt_=Date.now();d=calendarData;e=(d.events||[]).find(x=>x.eventId===eventId);if(!e)return renderCalendar();}
-  const persons={};(d.persons||[]).forEach(p=>persons[p.personId]=p);const parts=(d.participants||[]).filter(p=>p.eventId===eventId);
-  const canEdit=d.canCreate&&['ADMIN','MANAGER','COACH'].includes(currentUser?.role);const meta=(d.leagueMeta||[]).find(m=>m.eventId===eventId);const reportProtected=(d.matchReportEventIds||[]).includes(eventId);
   if(e.eventType==='TRAINING'){
     const attendanceExists=['IN_PROGRESS','COMPLETED'].includes(e.status)||!!e.attendanceClosedAt;
     const section=requestedSection||(attendanceExists?'attendance':'availability');
-    let availabilityData=null,trainingPlanData=null;
+    let availabilityData=null,trainingPlanData=null,parts=[],persons={},meta=detailHeader?.leagueMeta||null;
+    let canManageEvent=!!detailHeader?.canManageEvent,canManageAttendance=!!detailHeader?.canManageAttendance,reportProtected=false;
+    if(fullCalendarReady){
+      (d.persons||[]).forEach(p=>persons[p.personId]=p);parts=(d.participants||[]).filter(p=>p.eventId===eventId);
+      canManageEvent=!!(d.canCreate&&['ADMIN','MANAGER','COACH'].includes(currentUser?.role));canManageAttendance=canManageEvent;
+      meta=(d.leagueMeta||[]).find(m=>m.eventId===eventId)||meta;reportProtected=(d.matchReportEventIds||[]).includes(eventId);
+    }else if(section==='attendance'){
+      try{
+        const fast=(await call('getTrainingAttendanceFast',{eventId})).data;
+        e=fast.event||e;parts=fast.participants||[];(fast.persons||[]).forEach(p=>persons[p.personId]=p);meta=fast.leagueMeta||meta;
+        canManageAttendance=!!fast.canManage;canManageEvent=!!fast.canManageEvent;
+      }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar la asistencia</h1><p>${escapeHtml(userErrorText_(err))}</p><button class="button secondary" id="training-fast-error-back">Volver</button></section>`,'calendar');document.getElementById('training-fast-error-back')?.addEventListener('click',renderCalendar);return;}
+    }
     if(section==='plan'){
       try{trainingPlanData=(await call('getTrainingSessionPlanData',{eventId})).data;}catch(err){trainingPlanData={event:e,blocks:[],exercises:[],staff:[],canManage:false,error:err.message};}
     }
-    if(section==='availability'||(section==='attendance'&&['IN_PROGRESS','COMPLETED'].includes(e.status)&&!parts.length)){
+    if(section==='availability'){
       try{availabilityData=(await call('getEventAvailabilityData',{eventId})).data;}catch(ignore){availabilityData=null;}
       if(availabilityData?.attendanceBackfilled){invalidateCalendarCaches_();return renderEventDetail(eventId,section);}
     }
@@ -2557,13 +2557,13 @@ async function renderEventDetail(eventId,requestedSection=''){
     const tabs=eventWorkspaceTabsHtml_(e,section,{attendanceExists:true});
     let content='';
     if(section==='plan')content=trainingPlanData?.error?`<div class="message error">${escapeHtml(trainingPlanData.error)}</div>`:trainingSessionPlanHtml_(trainingPlanData);
-    else if(section==='attendance')content=trainingAttendanceHtml_(parts,persons,e,canEdit);
+    else if(section==='attendance')content=trainingAttendanceHtml_(parts,persons,e,canManageAttendance);
     else if(section==='survey')content=`<section class="post-training-survey"><div><span class="eyebrow">Post-entrenamiento</span><h2>Encuesta del entrenamiento</h2><p>${e.status==='COMPLETED'?'La actividad finalizó. La encuesta quedará asociada a este entrenamiento cuando definamos sus preguntas.':'La encuesta se habilitará al finalizar el entrenamiento.'}</p></div><span class="status-pill warning">Pendiente</span></section>`;
     else {
       if(!availabilityData){try{availabilityData=(await call('getEventAvailabilityData',{eventId})).data;}catch(ignore){availabilityData=null;}}
-      content=eventAvailabilityPreviewHtml_(availabilityData,e)+(availabilityData?.isOpenForAvailability&&canEdit?'<div class="button-row"><button class="button primary" id="manage-availability-inline">Gestionar disponibilidad</button></div>':'');
+      content=eventAvailabilityPreviewHtml_(availabilityData,e)+(availabilityData?.isOpenForAvailability&&canManageEvent?'<div class="button-row"><button class="button primary" id="manage-availability-inline">Gestionar disponibilidad</button></div>':'');
     }
-    const adminActions=canEdit?`<div class="button-row event-actions secondary-actions">${['PENDING','SCHEDULED'].includes(e.status)?'<button class="button secondary" id="edit-event">Editar</button>':''}${reportProtected?(e.status==='CANCELLED'?'<button class="button secondary" id="reactivate-activity">Reactivar</button>':''):((['PENDING','SCHEDULED'].includes(e.status))?'<button class="button secondary" id="cancel-activity">Cancelar actividad</button>':e.status==='CANCELLED'?'<button class="button secondary" id="reactivate-activity">Reactivar</button>':'')}${['PENDING','SCHEDULED'].includes(e.status)?'<button class="button secondary" id="postpone-activity">Postergar</button>':''}${e.status==='POSTPONED'?'<button class="button secondary" id="reschedule-event">Reprogramar</button>':''}${reportProtected||e.sourceType==='TRAINING_PLAN'?'':`<button class="button link danger-text" id="delete-event">Borrar</button>`}</div>`:'';
+    const adminActions=canManageEvent?`<div class="button-row event-actions secondary-actions">${['PENDING','SCHEDULED'].includes(e.status)?'<button class="button secondary" id="edit-event">Editar</button>':''}${reportProtected?(e.status==='CANCELLED'?'<button class="button secondary" id="reactivate-activity">Reactivar</button>':''):((['PENDING','SCHEDULED'].includes(e.status))?'<button class="button secondary" id="cancel-activity">Cancelar actividad</button>':e.status==='CANCELLED'?'<button class="button secondary" id="reactivate-activity">Reactivar</button>':'')}${['PENDING','SCHEDULED'].includes(e.status)?'<button class="button secondary" id="postpone-activity">Postergar</button>':''}${e.status==='POSTPONED'?'<button class="button secondary" id="reschedule-event">Reprogramar</button>':''}${reportProtected||e.sourceType==='TRAINING_PLAN'?'':`<button class="button link danger-text" id="delete-event">Borrar</button>`}</div>`:'';
     shell(`${header}<section class="panel match-detail-panel">${tabs}${e.notes?`<div class="match-note">${escapeHtml(e.notes)}</div>`:''}<div id="editor-host"></div><div class="event-section-host">${content}</div>${adminActions}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar');
     wireEventWorkspaceTabs_(eventId,e,{attendanceExists:true});
     document.getElementById('back-calendar').onclick=renderCalendar;const ma=document.getElementById('manage-availability-inline');if(ma)ma.onclick=()=>renderEventAvailability(eventId);
@@ -2580,11 +2580,12 @@ async function renderEventDetail(eventId,requestedSection=''){
     const reopenAttendance=document.getElementById('reopen-training-attendance');if(reopenAttendance)reopenAttendance.onclick=async()=>{if(!confirm('¿Reabrir la asistencia para hacer correcciones? La reapertura quedará registrada en auditoría.'))return;try{reopenAttendance.disabled=true;await call('reopenTrainingAttendance',{eventId});invalidateCalendarCaches_();showToast_('Asistencia reabierta.','success',1800);await renderEventDetail(eventId,'attendance');}catch(err){showMessage(err.message,'error');reopenAttendance.disabled=false;}};
     return;
   }
+  if(!fullCalendarReady){const r=await call('getCalendarData',{seasonId:selectedSeasonId_()});calendarData=r.data;calendarDataLoadedAt_=Date.now();d=calendarData;e=(d.events||[]).find(x=>x.eventId===eventId);if(!e)return renderCalendar();}
+  const meta=(d.leagueMeta||[]).find(m=>m.eventId===eventId);
   const header=activityHeaderHtml_(e,meta);
   shell(`${header}<section class="panel match-detail-panel">${e.notes?`<div class="match-note">${escapeHtml(e.notes)}</div>`:''}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div></section>`,'calendar');
   document.getElementById('back-calendar').onclick=renderCalendar;
 }
-
 
 let leagueImportState=null;
 function teamsForDivision_(divisionId){return (calendarData?.teams||[]).filter(t=>!divisionId||t.divisionId===divisionId);}
@@ -2742,17 +2743,32 @@ function matchParticipationBlockHtml_(data){
   return `<div class="section-divider"></div><section class="match-participation"><div class="panel-heading"><div><h2>Participación real</h2><p>${closed?'Participación confirmada y cerrada. Si necesitás corregirla, reabrila; queda auditado.':'Marcá lo que ocurrió realmente. La disponibilidad y convocatoria previas no se modifican.'}</p></div><span class="status-pill ${closed?'active':'warning'}">${closed?'Confirmada':pending?pending+' pendiente(s)':'Lista para confirmar'}</span></div><div class="table-wrap compact-table"><table><thead><tr><th>Orden</th><th>Dorsal</th><th>Jugador</th><th>Participación</th></tr></thead><tbody>${body}</tbody></table></div>${actions}</section>`;
 }
 
-const matchPlanningCache_=new Map();
+const matchPlanningCache_=new Map(),matchShellCache_=new Map();
 function invalidateMatchPlanningCache_(eventId){
-  if(!eventId){matchPlanningCache_.clear();return;}
-  const prefix=String(eventId)+'|';[...matchPlanningCache_.keys()].forEach(k=>{if(String(k).startsWith(prefix))matchPlanningCache_.delete(k);});
+  if(!eventId){matchPlanningCache_.clear();matchShellCache_.clear();return;}
+  const prefix=String(eventId)+'|';[...matchPlanningCache_.keys()].forEach(k=>{if(String(k).startsWith(prefix))matchPlanningCache_.delete(k);});matchShellCache_.delete(String(eventId));
 }
 function primeMatchPlanningCache_(eventId,section,data){if(!eventId||!data)return;matchPlanningCache_.set(String(eventId)+'|'+String(section||'summary'),{at:Date.now(),data});}
+function primeMatchShellCache_(eventId,data){if(!eventId||!data?.event)return;matchShellCache_.set(String(eventId),{at:Date.now(),data});}
+async function getMatchShellCached_(eventId,seed=null,force=false){
+  const key=String(eventId),now=Date.now();if(seed?.event){primeMatchShellCache_(eventId,seed);return seed;}
+  const hit=matchShellCache_.get(key);if(!force&&hit&&now-hit.at<120000)return hit.data;
+  const {data}=await call('getMatchShellData',{eventId});primeMatchShellCache_(eventId,data);return data;
+}
+function defaultMatchSectionFromShell_(data){const state=data?.matchState||{};return data?.defaultSection||((state.summaryVisible||state.summaryExists)?'summary':Number(state.lineupCount||0)>0?'convocados':'availability');}
+function renderMatchShellFrame_(eventId,data,section){
+  const e=data?.event;if(!e)return;const state=data.matchState||{},summaryExists=!!state.summaryExists,summaryVisible=!!state.summaryVisible;
+  const planningHeader=matchHeaderHtml_(e,data.leagueMeta||data.meta||null,{compact:true});
+  const tabs=eventWorkspaceTabsHtml_(e,section,{summaryExists,summaryVisible,attendanceExists:false,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&!!data.hasClubReferee});
+  shell(`${planningHeader}<section class="panel match-workspace-panel match-shell-hot">${tabs}<div class="event-section-host"><div class="empty-state"><strong>Cargando ${escapeHtml(section==='convocados'?'convocados':section==='availability'?'disponibilidad':section==='survey'?'encuesta':'resumen')}…</strong><br><small>La cabecera del partido ya está disponible; el detalle se carga sólo para esta sección.</small></div></div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div></section>`,'calendar');
+  wireEventWorkspaceTabs_(eventId,e,{summaryExists,summaryVisible,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&!!data.hasClubReferee});
+  document.getElementById('planning-back')?.addEventListener('click',renderCalendar);
+}
 async function getMatchPlanningCached_(eventId,section='summary',force=false){
-  const normalized=String(section||'summary'),key=String(eventId)+'|'+normalized,now=Date.now(),hit=matchPlanningCache_.get(key);if(!force&&hit&&now-hit.at<45000)return hit.data;
+  const normalized=String(section||'summary'),key=String(eventId)+'|'+normalized,now=Date.now(),hit=matchPlanningCache_.get(key);if(!force&&hit&&now-hit.at<120000)return hit.data;
   const action=normalized==='summary'?'getMatchSummaryFast':normalized==='convocados'?'getMatchLineupFast':normalized==='survey'?'getMatchSurveyFast':'getMatchPlanningData';
   const payload=action==='getMatchPlanningData'?{eventId,section:normalized}:{eventId};
-  const {data}=await call(action,payload);matchPlanningCache_.set(key,{at:now,data});return data;
+  const {data}=await call(action,payload);matchPlanningCache_.set(key,{at:Date.now(),data});return data;
 }
 function matchSummaryExistsClient_(data){
   const e=data?.event||{},after=['IN_PROGRESS','COMPLETED'].includes(String(e.status||''));
@@ -2809,17 +2825,15 @@ function wireEventWorkspaceTabs_(eventId,event,opts={}){
   document.querySelectorAll('[data-event-action="links"]').forEach(btn=>btn.onclick=()=>openOfficialLinksEditor_(event));
   document.querySelectorAll('[data-event-action="referee"]').forEach(btn=>btn.onclick=()=>renderRefereeMatchWorkspace(eventId,'summary'));
 }
-async function renderMatchPlanning(eventId,requestedSection='auto'){
+async function renderMatchPlanning(eventId,requestedSection='auto',shellSeed=null){
   try{
-    let section=requestedSection||'auto';
-    // 0.6.87: primero decide qué pestaña necesita y sólo después solicita sus
-    // datos. Abrir Resumen ya no carga disponibilidad/roster/partido anterior.
-    if(section==='auto'){
-      const {data:state}=await call('getMatchSectionState',{eventId});
-      section=(state.summaryVisible||state.summaryExists)?'summary':Number(state.lineupCount||0)>0?'convocados':'availability';
-    }
+    const shellData=await getMatchShellCached_(eventId,shellSeed),sectionRequested=requestedSection||'auto';
+    let section=sectionRequested==='auto'?defaultMatchSectionFromShell_(shellData):sectionRequested;
+    // 0.6.97: pintar primero el shell desde EventSnapshot. La sección pesada se
+    // solicita después y no bloquea cabecera, navegación ni botón Volver.
+    renderMatchShellFrame_(eventId,shellData,section);
     if(section==='availability')return renderEventAvailability(eventId);
-    const data=await getMatchPlanningCached_(eventId,section);const e=data.event,lineMap={};(data.lineup||[]).forEach(l=>lineMap[l.personId]=l);
+    const data=await getMatchPlanningCached_(eventId,section);primeMatchShellCache_(eventId,Object.assign({},shellData,{event:data.event||shellData.event,leagueMeta:data.leagueMeta||shellData.leagueMeta}));const e=data.event,lineMap={};(data.lineup||[]).forEach(l=>lineMap[l.personId]=l);
     const summaryExists=matchSummaryExistsClient_(data),summaryVisible=matchSummaryVisibleClient_(data),lineupExists=(data.lineup||[]).length>0;
     const previousMap={};(data.previousLineup||[]).forEach(l=>previousMap[l.personId]=l);
     const hasPrevious=data.canEditLineup&&(data.previousLineup||[]).length>0;

@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.7.4';
+const FRONTEND_BUILD = '0.7.5';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -2044,7 +2044,7 @@ function coachingRubricAverageClient_(rubric){const values=Object.values(rubric|
 function coachingAutoRatingMarkup_(rating,count){const n=Number(rating||0);return `<div class="coaching-auto-rating" id="coaching-overall-rating"><strong>${n?escapeHtml(String(n))+'/5':'—'}</strong><small>${count?`Calculada con ${count} criterio${count===1?'':'s'} evaluado${count===1?'':'s'}.`:'Se calcula con los criterios evaluados.'}</small></div>`;}
 async function loadCoachingData_(force=false){if(coachingData&&!force&&(Date.now()-coachingDataCachedAt)<CLIENT_HOT_CACHE_MS)return coachingData;const {data}=await call('getCoachingData',{seasonId:selectedSeasonId_()});coachingData=data||{};coachingDataCachedAt=Date.now();return coachingData;}
 function coachingTeamLabel_(team){if(!team)return 'Team';return team.name||team.code||'Team';}
-function coachingEventLabel_(event){if(!event)return 'Sin actividad asociada';const main=event.eventType==='MATCH'?(event.opponent?`Partido vs ${event.opponent}`:(event.title||'Partido')):(event.title||'Entrenamiento'),team=event.eventType==='MATCH'&&event.teamName?` · ${event.teamName}`:'';return `${event.eventDate||''}${event.startTime?' · '+event.startTime:''}${team} · ${main}`;}
+function coachingEventLabel_(event){if(!event)return 'Sin actividad asociada';const main=event.eventType==='MATCH'?(event.opponent?`Partido vs ${event.opponent}`:(event.title||'Partido')):(event.title||'Entrenamiento'),scope=event.eventType==='MATCH'?(event.teamName||event.divisionName||''):(event.divisionName||'');return `${event.eventDate||''}${event.startTime?' · '+event.startTime:''}${scope?' · '+scope:''} · ${main}`;}
 function coachingSubjectSummary_(mode,data,subjectId){const list=mode==='division'?(data.divisionSummary||[]):(data.refereeSummary||[]);return list.find(x=>(mode==='division'?x.divisionId:x.personId)===subjectId)||{};}
 function coachingActionsForReview_(reviewId,data){return (data.actions||[]).filter(a=>a.coachingReviewId===reviewId);}
 function coachingListMarkup_(title,items,empty){return `<div class="coaching-list-block"><strong>${escapeHtml(title)}</strong>${items?.length?`<ul>${items.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:`<p class="muted">${escapeHtml(empty||'Sin información.')}</p>`}</div>`;}

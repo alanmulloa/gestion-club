@@ -1,10 +1,10 @@
 {
-  "version": "0.7.1",
-  "generatedAt": "2026-10-20T21:51:15.769Z",
+  "version": "0.7.2",
+  "generatedAt": "2026-10-20T22:22:36.241Z",
   "assets": {
-    "js": "assets/js/app-0.7.1.js",
-    "css": "assets/css/app-0.7.1.css",
-    "jsSha256": "9f514dbe754269a5c9ed0eaa64c01157d7070c67588cc1c0e9f3c9cfb04a2de9",
+    "js": "assets/js/app-0.7.2.js",
+    "css": "assets/css/app-0.7.2.css",
+    "jsSha256": "96fda449d699c9991db664c2b0d3ef4842c5296b0fdd89de6e9e8ae662a6552d",
     "cssSha256": "bc346ac0175ede8d826781f8a6cdb1935f996edd098ec5dab34ac118a3e31511"
   }
 }

@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.98';
+const FRONTEND_BUILD = '0.6.99';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -26,9 +26,38 @@ let dashboardNextRefreshTimer = null;
 let homeInteractiveMeta_ = null;
 let performanceFilterState_={version:'CURRENT',period:'TODAY'};
 const UI_STATE_KEY = 'gestionClub.uiState.v1';
+const SCREEN_SCROLL_KEY = 'gestionClub.screenScroll.v1';
+const CLIENT_HOT_CACHE_MS = 300000;
+const CLIENT_REFEREE_CACHE_MS = 180000;
+const inFlightReadCalls_ = new Map();
+let currentScreenKey_ = 'home';
+let mobileMoreReturnFocus_ = null;
 function loadUiState_(){try{return JSON.parse(sessionStorage.getItem(UI_STATE_KEY)||'{}')||{};}catch(_){return {};}}
 function saveUiStatePatch_(patch){const next=Object.assign({},loadUiState_(),patch||{});sessionStorage.setItem(UI_STATE_KEY,JSON.stringify(next));return next;}
 function textNorm_(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
+
+function readScreenScroll_(){try{return JSON.parse(sessionStorage.getItem(SCREEN_SCROLL_KEY)||'{}')||{};}catch(_){return {};}}
+function rememberScreenScroll_(key=currentScreenKey_){if(!key||!currentUser)return;try{const state=readScreenScroll_();state[String(key)]=Math.max(0,Math.round(window.scrollY||0));sessionStorage.setItem(SCREEN_SCROLL_KEY,JSON.stringify(state));}catch(_){}}
+function restoreScreenScroll_(key=currentScreenKey_,force=false){if(!key||!currentUser)return;let y=0;try{y=Number(readScreenScroll_()[String(key)]||0);}catch(_){}requestAnimationFrame(()=>requestAnimationFrame(()=>{if(force||y>0)window.scrollTo({top:Math.max(0,y),left:0,behavior:'auto'});}));}
+function focusMainContent_(){const main=document.getElementById('main-content');if(!main)return;try{main.focus({preventScroll:true});}catch(_){main.focus();}}
+function stableRequestValue_(value){if(Array.isArray(value))return value.map(stableRequestValue_);if(value&&typeof value==='object'){const out={};Object.keys(value).sort().forEach(k=>out[k]=stableRequestValue_(value[k]));return out;}return value;}
+function requestCoalesceKey_(action,payload){try{return String(action||'')+'|'+JSON.stringify(stableRequestValue_(payload||{}))+'|'+String(simulationState?.personId||'');}catch(_){return String(action||'');}}
+function shouldCoalesceRead_(action){return /^(get|list|status)/i.test(String(action||''))&&!/^(getPerformanceData|getFarSyncStatus)$/i.test(String(action||''));}
+function installUiActionGuard_(){
+  document.addEventListener('click',event=>{
+    const button=event.target?.closest?.('button.button,button[type="submit"]');
+    if(!button||button.disabled||button.matches('[data-nav],.stats-tab,.settings-tab,.subnav-link,.mobile-nav-link,.mobile-more-link,.event-section-tabs .button'))return;
+    const now=Date.now(),last=Number(button.dataset.gcLastClick||0);
+    if(last&&now-last<700){event.preventDefault();event.stopImmediatePropagation();return;}
+    button.dataset.gcLastClick=String(now);
+  },true);
+}
+function installConnectivityFeedback_(){
+  window.addEventListener('offline',()=>showToast_('Sin conexión. Los cambios no se enviarán hasta recuperar Internet.','warning',5000));
+  window.addEventListener('online',()=>showToast_('Conexión recuperada.','success',2200));
+}
+installUiActionGuard_();
+installConnectivityFeedback_();
 const APP_TIMEZONE = config.timezone || 'Europe/Madrid';
 function formatAppDateTime_(value){
   if(!value)return '';
@@ -320,6 +349,17 @@ function shouldShowUiBusyForAction_(action){
 }
 
 async function call(action, payload = {}, fixedRequestId = null) {
+  if(shouldCoalesceRead_(action)){
+    const key=requestCoalesceKey_(action,payload);
+    if(inFlightReadCalls_.has(key))return inFlightReadCalls_.get(key);
+    const pending=callInternal_(action,payload,fixedRequestId);
+    inFlightReadCalls_.set(key,pending);
+    try{return await pending;}finally{if(inFlightReadCalls_.get(key)===pending)inFlightReadCalls_.delete(key);}
+  }
+  return callInternal_(action,payload,fixedRequestId);
+}
+
+async function callInternal_(action, payload = {}, fixedRequestId = null) {
   if(simulationActive_()&&!simulationState.allowActions&&!simulationActionIsReadOnlyClient_(action)){
     const error=new Error('Modo simulación en solo lectura. Volvé a Administrador o habilitá acciones de prueba en DEV.');error.code='SIMULATION_READ_ONLY';throw error;
   }
@@ -564,10 +604,10 @@ function navIcon_(key){return ({home:'⌂',structure:'◆',families:'♙',docume
 function navMarkup(active) {
   if (!currentUser) return '';
   return navigationForRole().map(([key,label]) =>
-    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${navIcon_(key)}</span><span class="nav-label">${label}</span></button>`
+    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}" ${active===key?'aria-current="page"':''}><span class="nav-icon">${navIcon_(key)}</span><span class="nav-label">${label}</span></button>`
   ).join('');
 }
-// 0.6.98 - navegación móvil intencional: tres destinos de uso frecuente + Más.
+// 0.6.99 - navegación móvil intencional: tres destinos de uso frecuente + Más.
 // Administración, importaciones y biblioteca siguen accesibles, pero dejan de competir
 // por espacio con las tareas de campo (Inicio, Calendario y ámbito deportivo).
 function mobilePrimaryNavigation_(){
@@ -582,7 +622,7 @@ function mobilePrimaryNavigation_(){
 }
 function mobileNavMarkup_(active){
   const primary=mobilePrimaryNavigation_(),primaryKeys=new Set(primary.map(x=>x[0])),moreActive=!primaryKeys.has(active);
-  return primary.map(([key,label])=>`<button class="mobile-nav-link ${active===key?'active':''}" data-nav="${key}"><span aria-hidden="true">${navIcon_(key)}</span><small>${escapeHtml(label)}</small></button>`).join('')+`<button class="mobile-nav-link ${moreActive?'active':''}" id="mobile-more-toggle" type="button" aria-controls="mobile-more-sheet" aria-expanded="false"><span aria-hidden="true">•••</span><small>Más</small></button>`;
+  return primary.map(([key,label])=>`<button class="mobile-nav-link ${active===key?'active':''}" data-nav="${key}" ${active===key?'aria-current="page"':''}><span aria-hidden="true">${navIcon_(key)}</span><small>${escapeHtml(label)}</small></button>`).join('')+`<button class="mobile-nav-link ${moreActive?'active':''}" id="mobile-more-toggle" type="button" aria-controls="mobile-more-sheet" aria-expanded="false"><span aria-hidden="true">•••</span><small>Más</small></button>`;
 }
 function mobileContextMarkup_(){
   const seasons=seasonList_(),selected=selectedSeasonId_(),contexts=roleContexts_(),ctx=currentRoleContext_(),sim=simulationActive_()?simulationState.personId:'';
@@ -594,16 +634,19 @@ function mobileContextMarkup_(){
 function mobileMoreMarkup_(active){
   const primaryKeys=new Set(mobilePrimaryNavigation_().map(x=>x[0]));
   const secondary=navigationForRole().filter(([key])=>!primaryKeys.has(key));
-  return `<div class="mobile-more-backdrop" id="mobile-more-backdrop" hidden></div><aside class="mobile-more-sheet" id="mobile-more-sheet" hidden aria-label="Más opciones"><div class="mobile-sheet-handle"></div><div class="mobile-sheet-head"><div><span class="eyebrow">Gestión Club</span><h2>Más opciones</h2></div><button type="button" class="button ghost mobile-sheet-close" id="mobile-more-close" aria-label="Cerrar">×</button></div><div class="mobile-context-card">${mobileContextMarkup_()}</div><nav class="mobile-more-nav">${secondary.map(([key,label])=>`<button class="mobile-more-link ${active===key?'active':''}" data-nav="${key}"><span>${navIcon_(key)}</span><span><strong>${escapeHtml(label)}</strong>${key==='settings'?'<small>Administración · mejor en escritorio</small>':key==='exercises'?'<small>Biblioteca y planificación</small>':''}</span><b>›</b></button>`).join('')}</nav><button class="button secondary mobile-logout" id="mobile-logout" type="button">Cerrar sesión</button></aside>`;
+  return `<div class="mobile-more-backdrop" id="mobile-more-backdrop" hidden></div><aside class="mobile-more-sheet" id="mobile-more-sheet" hidden aria-label="Más opciones"><div class="mobile-sheet-handle"></div><div class="mobile-sheet-head"><div><span class="eyebrow">Gestión Club</span><h2>Más opciones</h2></div><button type="button" class="button ghost mobile-sheet-close" id="mobile-more-close" aria-label="Cerrar">×</button></div><div class="mobile-context-card">${mobileContextMarkup_()}</div><nav class="mobile-more-nav">${secondary.map(([key,label])=>`<button class="mobile-more-link ${active===key?'active':''}" data-nav="${key}" ${active===key?'aria-current="page"':''}><span>${navIcon_(key)}</span><span><strong>${escapeHtml(label)}</strong>${key==='settings'?'<small>Administración · mejor en escritorio</small>':key==='exercises'?'<small>Biblioteca y planificación</small>':''}</span><b>›</b></button>`).join('')}</nav><button class="button secondary mobile-logout" id="mobile-logout" type="button">Cerrar sesión</button></aside>`;
 }
-function closeMobileMore_(){
+function closeMobileMore_(restoreFocus=true){
   document.getElementById('mobile-more-backdrop')?.setAttribute('hidden','');document.getElementById('mobile-more-sheet')?.setAttribute('hidden','');document.getElementById('mobile-more-toggle')?.setAttribute('aria-expanded','false');document.body.classList.remove('mobile-sheet-open');
+  if(restoreFocus&&mobileMoreReturnFocus_){try{mobileMoreReturnFocus_.focus({preventScroll:true});}catch(_){mobileMoreReturnFocus_.focus();}}mobileMoreReturnFocus_=null;
 }
 function openMobileMore_(){
-  document.getElementById('mobile-more-backdrop')?.removeAttribute('hidden');document.getElementById('mobile-more-sheet')?.removeAttribute('hidden');document.getElementById('mobile-more-toggle')?.setAttribute('aria-expanded','true');document.body.classList.add('mobile-sheet-open');
+  mobileMoreReturnFocus_=document.activeElement;document.getElementById('mobile-more-backdrop')?.removeAttribute('hidden');document.getElementById('mobile-more-sheet')?.removeAttribute('hidden');document.getElementById('mobile-more-toggle')?.setAttribute('aria-expanded','true');document.body.classList.add('mobile-sheet-open');
+  requestAnimationFrame(()=>document.getElementById('mobile-more-close')?.focus());
 }
 function wireMobileChrome_(active){
-  document.getElementById('mobile-more-toggle')?.addEventListener('click',openMobileMore_);document.getElementById('mobile-more-close')?.addEventListener('click',closeMobileMore_);document.getElementById('mobile-more-backdrop')?.addEventListener('click',closeMobileMore_);document.getElementById('mobile-logout')?.addEventListener('click',()=>{closeMobileMore_();logout();});
+  document.getElementById('mobile-more-toggle')?.addEventListener('click',openMobileMore_);document.getElementById('mobile-more-close')?.addEventListener('click',()=>closeMobileMore_());document.getElementById('mobile-more-backdrop')?.addEventListener('click',()=>closeMobileMore_());document.getElementById('mobile-logout')?.addEventListener('click',()=>{closeMobileMore_(false);logout();});
+  document.getElementById('mobile-more-sheet')?.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();closeMobileMore_();}});
   document.getElementById('mobile-season-select')?.addEventListener('change',async e=>{resetSeasonScopedUi_(e.target.value);await refreshAccessProfileForSeason_();resetContextScopedUi_();closeMobileMore_();rerenderForSeason_(active);});
   document.getElementById('mobile-role-context')?.addEventListener('change',e=>{saveRoleContextId_(e.target.value);resetContextScopedUi_();closeMobileMore_();showToast_('Contexto cambiado a '+(currentRoleContext_().label||'la vista seleccionada')+'.','success',1800);rerenderForContext_(active);});
   document.getElementById('mobile-simulation-person')?.addEventListener('change',e=>{closeMobileMore_();activateSimulation_(e.target.value);});
@@ -636,7 +679,7 @@ function accessScopeOverviewHtml_(){
   return `<section class="panel access-overview"><div class="panel-heading"><div><h2>Accesos efectivos</h2><p>Los permisos se suman por cargo, pero respetan la división donde fue asignado cada uno.</p></div></div><div class="access-scope-list">${rows}${refereeRow}</div><div class="info-strip"><strong>Documentación:</strong> el Coordinador puede ver el estado documental; la carga/revisión de documentos de una división queda reservada al Manager.</div></section>`;
 }
 
-function isMobileViewport(){ return window.matchMedia && window.matchMedia('(max-width: 760px)').matches; }
+function isMobileViewport(){ return window.matchMedia && window.matchMedia('(max-width: 820px)').matches; }
 
 // Convierte tablas operativas pequeñas en tarjetas legibles en teléfono sin tocar
 // el HTML de escritorio. Las tablas técnicas/monitorización conservan scroll horizontal.
@@ -652,10 +695,26 @@ function enhanceMobileTables_(){
   });
 }
 function scheduleMobileEnhance_(){if(mobileEnhanceQueued_)return;mobileEnhanceQueued_=true;requestAnimationFrame(()=>{mobileEnhanceQueued_=false;enhanceMobileTables_();});}
+
+async function navigateMain_(nav,{restore=true}={}){
+  rememberScreenScroll_(currentScreenKey_);
+  closeMobileMore_(false);
+  const key=String(nav||'home');
+  if(key==='settings')await renderClubSettings();
+  else if(key==='structure')await renderStructure();
+  else if(key==='families')await renderFamilies();
+  else if(key==='documents')await renderDocuments();
+  else if(key==='calendar')await renderCalendar();
+  else if(key==='exercises')await renderTrainingExercises();
+  else if(key==='statistics')await renderStatistics();
+  else await renderDashboard();
+  if(restore)restoreScreenScroll_(key,true);
+}
 const mobileEnhanceObserver_=new MutationObserver(()=>scheduleMobileEnhance_());mobileEnhanceObserver_.observe(root,{childList:true,subtree:true});
 window.addEventListener('resize',scheduleMobileEnhance_,{passive:true});
 
-function shell(content, active = 'home') {
+function shell(content, active = 'home', screenKey = active) {
+  const previousScreen=currentScreenKey_;rememberScreenScroll_(previousScreen);currentScreenKey_=String(screenKey||active||'home');
   root.className = '';
   document.body.classList.toggle('login-mode', !currentUser);
   root.innerHTML = `
@@ -668,7 +727,7 @@ function shell(content, active = 'home') {
     </header>
     ${currentUser ? `<nav class="nav desktop-nav">${navMarkup(active)}</nav><nav class="mobile-bottom-nav" aria-label="Navegación móvil">${mobileNavMarkup_(active)}</nav>${mobileMoreMarkup_(active)}` : ''}
     ${currentUser ? simulationBannerMarkup_() : ''}
-    <main class="container">${content}</main>
+    <main class="container" id="main-content" tabindex="-1">${content}</main>
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')}${String(config.appVersion||'')!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:''} · entorno ${escapeHtml(config.environment || '')}</footer>`;
   const logoutButton = document.getElementById('logout');
   if (logoutButton) logoutButton.onclick = logout;
@@ -679,19 +738,10 @@ function shell(content, active = 'home') {
   const roleContextSelect=document.getElementById('global-role-context');if(roleContextSelect)roleContextSelect.onchange=()=>{saveRoleContextId_(roleContextSelect.value);resetContextScopedUi_();showToast_('Contexto cambiado a '+(currentRoleContext_().label||'la vista seleccionada')+'.','success',1800);rerenderForContext_(active);};
   wireMobileChrome_(active);
   document.querySelectorAll('[data-nav]').forEach(button => {
-    button.onclick = () => {
-      closeMobileMore_();
-      const nav=button.dataset.nav;
-      if(nav==='settings') return renderClubSettings();
-      if(nav==='structure') return renderStructure();
-      if(nav==='families') return renderFamilies();
-      if(nav==='documents') return renderDocuments();
-      if(nav==='calendar') return renderCalendar();
-      if(nav==='exercises') return renderTrainingExercises();
-      if(nav==='statistics') return renderStatistics();
-      return renderDashboard();
-    };
+    button.onclick = () => void navigateMain_(button.dataset.nav,{restore:true});
   });
+  scheduleMobileEnhance_();
+  if(previousScreen!==currentScreenKey_){focusMainContent_();restoreScreenScroll_(currentScreenKey_,true);}
 }
 
 function showMessage(message, kind = 'info', hostId = 'message') {
@@ -804,7 +854,7 @@ async function renderDashboard() {
     <section class="panel dashboard-week-panel"><div class="section-heading"><div><h2>Calendario de la semana</h2><p>Eventos dentro del contexto ${escapeHtml(ctx.label||'actual')}.</p></div><button class="button secondary" id="dashboard-open-calendar">Abrir calendario</button></div><div id="dashboard-week"><div class="skeleton-block tall"></div></div></section>
     <section class="panel"><div class="section-heading"><div><h2>Qué necesita tu atención</h2><p>Acciones detectadas automáticamente según tu rol y ámbito.</p></div></div><div id="dashboard-tasks"><div class="skeleton-block tall"></div></div></section>
     <div id="message" class="message" aria-live="polite"></div>`, 'home');
-  document.getElementById('dashboard-open-calendar').onclick=renderCalendar;
+  document.getElementById('dashboard-open-calendar').onclick=()=>void navigateMain_('calendar',{restore:true});
   const load=async()=>{const refresh=document.getElementById('dashboard-refresh');if(refresh)refresh.disabled=true;try{const {data:batch}=await call('getHomeInteractiveData',{seasonId:selectedSeasonId_(),roleCategory:role,divisionIds:contextDivisionIds_(),eventIds:contextEventIds_(),contextLabel:ctx.label||''});const data=batch?.home||batch||{};homeInteractiveMeta_=batch||null;const next=document.getElementById('dashboard-next'),week=document.getElementById('dashboard-week'),tasks=document.getElementById('dashboard-tasks'),summary=document.getElementById('dashboard-task-summary');if(next)next.innerHTML=dashboardEventCompactHtml_(data.nextEvent);if(week)week.innerHTML=dashboardWeekHtml_(data);if(tasks)tasks.innerHTML=dashboardTasksHtml_(data.tasks||[]);if(summary)summary.innerHTML=`<strong>${Number(data.taskCount||0)}</strong><span>${Number(data.taskCount||0)===1?'acción pendiente':'acciones / avisos pendientes'}</span>`;wireDashboardActions_();if(dashboardNextRefreshTimer){clearTimeout(dashboardNextRefreshTimer);dashboardNextRefreshTimer=null;}const refreshMs=Number(data.nextRefreshMs||0);if(refreshMs>0){dashboardNextRefreshTimer=setTimeout(()=>{dashboardNextRefreshTimer=null;if(document.getElementById('dashboard-next'))void load();},Math.min(refreshMs,2147480000));}}catch(error){showMessage(error.message,'error');const tasks=document.getElementById('dashboard-tasks');if(tasks)tasks.innerHTML='<div class="message error">No se pudieron cargar los pendientes.</div>';}finally{if(refresh)refresh.disabled=false;}};
   document.getElementById('dashboard-refresh').onclick=load;
   void load();
@@ -929,7 +979,7 @@ function renderPerformanceLocalPanel_(data){
   const rankHost=document.getElementById('performance-ranking');if(rankHost)rankHost.innerHTML=ranking.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Tipo</th><th>Operación</th><th>Llam.</th><th>Media</th><th>P95</th><th>Backend / overhead</th><th>Snapshot</th><th>Base</th><th>Sheets</th></tr></thead><tbody>${ranking.slice(0,12).map(r=>`<tr><td><span class="performance-pill ${r.lane==='UI'?'ok':''}">${escapeHtml(performanceLaneLabel_(r.lane))}</span></td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td>${r.count}</td><td>${r.avgMs} ms</td><td><span class="performance-pill ${r.lane==='UI'?performanceHealthClass_(r.p95Ms,thresholds):''}">${r.p95Ms} ms</span></td><td>${r.avgServerMs} / ${r.avgTransportMs} ms</td><td>${r.snapshotHitPct}%<small>${r.avgSnapshotReadMs} ms lectura</small></td><td>${r.avgBaseReads}</td><td>${r.avgSheetMs} ms</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';
   const rec=document.getElementById('performance-recommendations');if(rec){const active=remote.optimizations?.scriptCacheSheets||[];rec.innerHTML=`<div class="performance-recommendation-list">${performanceRecommendations_(uiRows,backgroundRows,thresholds,targets).map((x,i)=>`<article><span>${i+1}</span><p>${escapeHtml(x)}</p></article>`).join('')}</div>${performancePreviousVersionComparison_(uiRows,thresholds)}${remote.optimizations?.snapshotHotPath?`<div class="info-strip"><strong>Snapshot Hot Path activo.</strong> El semáforo usa sólo P95 UI; procesos pesados se muestran aparte. Objetivo HIT ≥ ${Number(remoteSnapshots.targetHitPct||80)}%.</div>`:active.length?`<div class="info-strip">Optimización activa: caché por petición + snapshots revisionados (${escapeHtml(String(remote.optimizations?.scriptCacheSeconds||''))}).</div>`:'<div class="info-strip">Métricas locales disponibles. Cargando información complementaria del backend…</div>'}`;}
   const recent=document.getElementById('performance-recent');if(recent){const recentRows=allRows.slice().sort((a,b)=>b.at-a.at).slice(0,24);recent.innerHTML=recentRows.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Tipo</th><th>Operación</th><th>Total</th><th>Snapshot</th><th>Base</th><th>Store</th><th>Sheets</th><th>Runtime</th><th>Payload</th></tr></thead><tbody>${recentRows.map(r=>{const state=String(r.snapshotState||'—').toUpperCase(),stateClass=state==='HIT'?'ok':state==='REBUILD'?'warning':state==='MISS'||state==='STALE'?'slow':'',lane=String(r.lane||performanceLaneClient_(r.action,r.category||performanceCategoryClient_(r.action)));return `<tr><td>${escapeHtml(formatAppDateTime_(new Date(r.at).toISOString()).slice(11))}</td><td><span class="performance-pill ${lane==='UI'?'ok':''}">${escapeHtml(performanceLaneLabel_(lane))}</span></td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action)}</small></td><td><span class="performance-pill ${lane==='UI'?performanceHealthClass_(r.roundTripMs,thresholds):''}">${r.roundTripMs} ms</span><small>backend ${Number(r.serverMs||0)} · overhead ${Number(r.transportMs||0)}</small></td><td><span class="performance-pill ${stateClass}">${escapeHtml(state)}</span><small>${escapeHtml(r.snapshotType||'')} · ${Number(r.snapshotReadMs||0)} / ${Number(r.snapshotRebuildMs||0)} ms</small></td><td>${Number(r.baseSheetReads||0)}</td><td>${Number(r.snapshotStoreReads||0)}</td><td>${Number(r.sheetReadMs||0)} ms</td><td><small>${escapeHtml(performanceRuntimeText_(r)||'—')}</small></td><td>${performanceFormatBytes_(r.payloadBytes)}</td></tr>`;}).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay llamadas medidas.</div>';}
-  const errorHost=document.getElementById('performance-errors');if(errorHost){const recentErrors=(remote.recentErrors||[]).slice(0,20);errorHost.innerHTML=recentErrors.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Tipo</th><th>Operación</th><th>Fase</th><th>Código</th><th>Mensaje</th><th>Backend</th></tr></thead><tbody>${recentErrors.map(r=>`<tr><td>${escapeHtml(formatAppDateTime_(r.occurredAt||new Date().toISOString()).slice(11))}</td><td>${escapeHtml(performanceLaneLabel_(r.lane||'UI'))}</td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action||'')}</small></td><td><span class="performance-pill warning">${escapeHtml(r.errorPhase||'DISPATCH')}</span></td><td>${escapeHtml(r.errorCode||'ERROR')}</td><td>${escapeHtml(r.errorMessage||'Sin detalle')}</td><td>${Number(r.serverMs||0)} ms</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No hay errores recientes registrados en esta versión.</div>';}
+  const errorHost=document.getElementById('performance-errors');if(errorHost){const recentErrors=(remote.recentErrors||[]).slice(0,20);errorHost.innerHTML=recentErrors.length?`<div class="table-wrap"><table class="performance-table"><thead><tr><th>Hora</th><th>Tipo</th><th>Operación</th><th>Fase</th><th>Código</th><th>Veces</th><th>Mensaje</th><th>Backend</th></tr></thead><tbody>${recentErrors.map(r=>`<tr><td>${escapeHtml(formatAppDateTime_(r.occurredAt||new Date().toISOString()).slice(11))}</td><td>${escapeHtml(performanceLaneLabel_(r.lane||'UI'))}</td><td><strong>${escapeHtml(performanceActionLabel_(r.action))}</strong><small>${escapeHtml(r.action||'')}</small></td><td><span class="performance-pill warning">${escapeHtml(r.errorPhase||'DISPATCH')}</span></td><td>${escapeHtml(r.errorCode||'ERROR')}</td><td>${Number(r.count||1)}</td><td>${escapeHtml(r.errorMessage||'Sin detalle')}</td><td>${Number(r.serverMs||0)} ms</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No hay errores recientes registrados en esta versión.</div>';}
 }
 function renderPerformanceServerLog_(data,error){
   const server=document.getElementById('performance-server-log');if(!server)return;
@@ -2075,7 +2125,7 @@ function wireRefereeStatsBody_(tab,data){
 async function renderRefereeStatistics(filters={}){
   try{
     const ui=loadUiState_(),previous=ui.refereeStatisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextRoleCategory:ctx.roleCategory||''});
-    const key=JSON.stringify(requested);let data=null;if(refereeStatisticsData&&refereeStatisticsDataCacheKey===key&&(Date.now()-refereeStatisticsDataCachedAt)<30000)data=refereeStatisticsData;else{const response=await call('getRefereeStatisticsData',requested);data=response.data;refereeStatisticsData=data;refereeStatisticsDataCacheKey=key;refereeStatisticsDataCachedAt=Date.now();}
+    const key=JSON.stringify(requested);let data=null;if(refereeStatisticsData&&refereeStatisticsDataCacheKey===key&&(Date.now()-refereeStatisticsDataCachedAt)<CLIENT_REFEREE_CACHE_MS)data=refereeStatisticsData;else{const response=await call('getRefereeStatisticsData',requested);data=response.data;refereeStatisticsData=data;refereeStatisticsDataCacheKey=key;refereeStatisticsDataCachedAt=Date.now();}
     const f=data.filters||{},activeTab=['summary','referees','evolution','focus'].includes(ui.refereeStatisticsTab)?ui.refereeStatisticsTab:'summary',tabs=[['summary','Resumen'],['referees',data.access?.selfOnly?'Mi temporada':'Árbitros'],['evolution','Evolución'],['focus','Focos']].map(([id,label])=>`<button type="button" class="stats-tab ${activeTab===id?'active':''}" data-ref-stats-tab="${id}">${label}</button>`).join('');
     const refOptions=data.access?.canFilterReferee?`<option value="">Todos los árbitros</option>`+(data.refereeOptions||data.referees||[]).map(r=>`<option value="${escapeHtml(r.personId)}" ${f.personId===r.personId?'selected':''}>${escapeHtml(r.displayName)}</option>`).join(''):'';
     shell(`<section class="hero compact"><span class="eyebrow">Área arbitral · Estadísticas</span><h1>Estadísticas arbitrales</h1><p>${data.access?.selfOnly?'Tus designaciones, dedicación y seguimiento durante la temporada.':'Designaciones FAR e internas, ocupación estimada y seguimiento de los árbitros del club.'}</p>${currentAccessProfile_().isAdmin?'<div class="button-row"><button class="button secondary" id="ref-stats-open-sport">Ver estadísticas deportivas</button></div>':''}</section><section class="panel stats-filter-panel"><div class="form-grid ${data.access?.canFilterReferee?'three':'two'}">${data.access?.canFilterReferee?`<label>Árbitro<select id="ref-stats-person">${refOptions}</select></label>`:''}<label>Desde<input id="ref-stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="ref-stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label></div><div class="button-row stats-filter-actions"><button class="button secondary" id="ref-stats-clear">Limpiar período</button></div></section><nav class="stats-tabs" aria-label="Secciones de estadísticas arbitrales">${tabs}</nav><div id="ref-stats-tab-host">${refereeStatsBody_(activeTab,data)}</div>`,'statistics');
@@ -2092,7 +2142,7 @@ async function renderStatistics(filters={}){
     if(['REFEREE','REFEREE_COORDINATOR'].includes(preRole)||(currentAccessProfile_().isAdmin&&preUi.statisticsMode==='referee'))return renderRefereeStatistics(filters);
     const ui=preUi,previous=ui.statisticsFilters||{},ctx=currentRoleContext_(),requested=Object.assign({},Object.keys(filters||{}).length?filters:previous,{seasonId:selectedSeasonId_(),contextDivisionIds:contextDivisionIds_(),contextRoleCategory:ctx.roleCategory||''});requested.divisionId=contextScopedDivisionId_(requested.divisionId||'');
     const statsKey=JSON.stringify(requested);let data=null;
-    if(statisticsData&&statisticsDataCacheKey===statsKey&&(Date.now()-statisticsDataCachedAt)<120000)data=statisticsData;
+    if(statisticsData&&statisticsDataCacheKey===statsKey&&(Date.now()-statisticsDataCachedAt)<CLIENT_HOT_CACHE_MS)data=statisticsData;
     else{const response=await call('getStatisticsData',requested);data=response.data;statisticsData=data;statisticsDataCacheKey=statsKey;statisticsDataCachedAt=Date.now();}
     const divMap=Object.fromEntries((data.divisions||[]).map(x=>[x.divisionId,x])),teamMap=Object.fromEntries((data.teams||[]).map(x=>[x.teamId,x])),f=data.filters||{};
     let activeTab=ui.statisticsTab||'summary';const allowedTabs=['summary','players','training','matches'].concat(data.access?.canCompare?['comparison']:[]);if(!allowedTabs.includes(activeTab))activeTab='summary';
@@ -2143,7 +2193,7 @@ function calendarVisibleRange_(){
 async function renderCalendar(forceReload=false){
   const state=Object.assign({},loadUiState_().calendarFilters||{});state.divisionId=contextScopedDivisionId_(state.divisionId||'');
   const seasonId=selectedSeasonId_(),range=calendarVisibleRange_(),calendarCacheKey=[seasonId,calendarView,range.fromDate,range.toDate,contextRoleCategory_(),contextDivisionIds_().join(',')].join('|');let d=null;
-  if(!forceReload&&calendarListCache_&&calendarListCache_.key===calendarCacheKey&&(Date.now()-calendarListCache_.at)<120000)d=calendarListCache_.data;
+  if(!forceReload&&calendarListCache_&&calendarListCache_.key===calendarCacheKey&&(Date.now()-calendarListCache_.at)<CLIENT_HOT_CACHE_MS)d=calendarListCache_.data;
   if(!d){try{const response=await call('getCalendarListData',{seasonId,fromDate:range.fromDate,toDate:range.toDate});d=response.data;calendarListCache_={key:calendarCacheKey,at:Date.now(),data:d};}catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar calendario</h1><p>${escapeHtml(err.message)}</p><button class="button primary" id="calendar-retry">Reintentar</button></section>`,'calendar');document.getElementById('calendar-retry')?.addEventListener('click',()=>renderCalendar(true));return;}}
   if(!calendarViewTouched&&loadUiState_().calendarView)calendarView=loadUiState_().calendarView;
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
@@ -2528,7 +2578,7 @@ function renderExternalRefereeMatchDetail_(e,d){
   const profile=String(occ?.profileOverride||e.refereeTravelProfile||'AUTO').toUpperCase();
   const overrideHtml=canManageOcc?`<div class="section-divider"></div><div class="section-heading"><h3>Ajustar desplazamiento</h3><p>Solo modifica la ventana de ocupación de esta designación FAR. No cambia la hora oficial del partido.</p></div><form id="ref-occ-event-form" class="form-grid two"><label>Tipo de desplazamiento<select id="ref-occ-event-profile"><option value="AUTO" ${profile==='AUTO'?'selected':''}>Automático</option><option value="LOCAL" ${profile==='LOCAL'?'selected':''}>Local / mismo club</option><option value="NEAR" ${profile==='NEAR'?'selected':''}>Cercano</option><option value="NORMAL" ${profile==='NORMAL'?'selected':''}>Normal</option><option value="LONG" ${profile==='LONG'?'selected':''}>Largo</option><option value="CUSTOM" ${profile==='CUSTOM'?'selected':''}>Personalizado</option></select></label><label>Viaje por trayecto (min, solo personalizado)<input id="ref-occ-event-custom" type="number" min="0" max="480" value="${escapeHtml(String(e.refereeTravelMinutesEachWay||occ?.travelEachWay||120))}"></label><div class="full"><small>Perfil aplicado actualmente: ${escapeHtml(refereeOccupationProfileLabelClient_(occ?.profile||profile))}.</small></div><div class="full button-row"><button class="button primary" type="submit">Guardar ocupación</button></div></form><div id="ref-occ-event-message" class="message"></div>`:'';
   shell(`<section class="match-overview compact"><div class="match-overview-title"><span class="eyebrow">Designación arbitral · FAR</span><h1>${escapeHtml(e.title||'Partido')}</h1></div><div class="match-overview-card"><div class="match-overview-primary"><div class="match-info competition"><span>Competición</span><strong>${escapeHtml(competitionName)}</strong>${meta.calendarCompetition&&meta.calendarCompetition!==competitionName?`<small>${escapeHtml(meta.calendarCompetition)}</small>`:''}</div><div class="match-info"><span>Jornada</span><strong>${escapeHtml(meta.roundName||'—')}</strong></div><div class="match-info"><span>Fecha</span><strong>${escapeHtml(e.eventDate||'—')}</strong></div><div class="match-info"><span>Hora del partido</span><strong>${escapeHtml(displayEventTime_(e)||'Pendiente')}</strong></div><div class="match-info"><span>Árbitro</span><strong>${escapeHtml(referee.displayName||meta.refereeName||'—')}</strong></div><div class="match-info"><span>Origen</span><strong>FAR / MatchReady</strong></div></div><div class="match-overview-location"><span>Ubicación</span><strong>${escapeHtml(e.location||'Pendiente')}</strong></div>${links?`<div class="official-link-bar"><span>Fuente oficial</span><div class="button-row">${links}</div></div>`:''}</div></section><section class="panel match-detail-panel">${occupationHtml}<div class="info-strip"><div><strong>Partido externo por designación arbitral</strong><br>Esta actividad se muestra al árbitro designado, al Coordinador de Árbitros y a Administración. No forma parte de las estadísticas deportivas de Marbella.</div></div>${overrideHtml}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div></section>`,'calendar');
-  document.getElementById('back-calendar').onclick=renderCalendar;
+  document.getElementById('back-calendar').onclick=()=>void navigateMain_('calendar',{restore:true});
   const form=document.getElementById('ref-occ-event-form');if(form)form.onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;try{await call('saveRefereeOccupancyOverride',{eventId:e.eventId,refereeTravelProfile:val('ref-occ-event-profile'),refereeTravelMinutesEachWay:val('ref-occ-event-custom')});invalidateCalendarCaches_();showToast_('Ocupación de la designación actualizada.');calendarData=null;await renderEventDetail(e.eventId);}catch(err){showMessage(userErrorText_(err),'error','ref-occ-event-message');if(button)button.disabled=false;}};
 }
 
@@ -2569,7 +2619,7 @@ async function renderRefereeMatchWorkspace(eventId,requestedSection='summary'){
     const source=data.origin==='FAR'?'FAR / MatchReady':'Designación del club';
     shell(`<section class="match-overview compact referee-workspace-header"><div class="match-overview-title"><span class="eyebrow">Área arbitral · ${escapeHtml(source)}</span><h1>${escapeHtml(e.title||'Partido')}</h1></div><div class="match-overview-card"><div class="match-overview-primary"><div class="match-info competition"><span>Competición</span><strong>${escapeHtml(meta.calendarCompetition||e.competition||'—')}</strong></div><div class="match-info"><span>Fecha</span><strong>${escapeHtml(e.eventDate||'—')}</strong></div><div class="match-info"><span>Hora</span><strong>${escapeHtml(displayEventTime_(e)||'Pendiente')}</strong></div><div class="match-info"><span>Árbitro</span><strong>${escapeHtml(data.referee?.displayName||'—')}</strong></div><div class="match-info"><span>Origen</span><strong>${escapeHtml(source)}</strong></div></div><div class="match-overview-location"><span>Ubicación</span><strong>${escapeHtml(e.location||'Pendiente')}</strong></div></div></section><section class="panel match-workspace-panel">${refereeMatchTabsHtml_(section)}<div class="event-section-host">${content}</div><div class="button-row"><button class="button secondary" id="referee-workspace-back">Volver al calendario</button>${data.clubMatch&&(currentAccessProfile_().isAdmin||!['REFEREE','REFEREE_COORDINATOR'].includes(contextRoleCategory_().toUpperCase()))?`<button class="button secondary" id="referee-workspace-sport">Ver ficha deportiva</button>`:''}</div></section>`,'calendar');
     document.querySelectorAll('[data-referee-tab]').forEach(btn=>btn.onclick=()=>renderRefereeMatchWorkspace(eventId,btn.dataset.refereeTab));
-    document.getElementById('referee-workspace-back').onclick=renderCalendar;
+    document.getElementById('referee-workspace-back').onclick=()=>void navigateMain_('calendar',{restore:true});
     document.getElementById('referee-workspace-sport')?.addEventListener('click',()=>renderMatchPlanning(eventId,'auto'));
     const pre=document.getElementById('referee-pre-form');if(pre)pre.onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;try{await call('saveRefereeMatchPre',{eventId,complete:button?.dataset.complete==='true',departureTime:val('ref-pre-departure'),targetArrivalTime:val('ref-pre-arrival'),travelNotes:val('ref-pre-travel'),preObjective:val('ref-pre-objective'),preFocus:val('ref-pre-focus'),prePhysicalStatus:val('ref-pre-physical'),preNotes:val('ref-pre-notes')});showToast_(button?.dataset.complete==='true'?'Preparación arbitral completada.':'Borrador guardado.');await renderRefereeMatchWorkspace(eventId,'pre');}catch(err){showMessage(userErrorText_(err),'error','referee-workflow-message');if(button)button.disabled=false;}};
     const post=document.getElementById('referee-post-form');if(post)post.onsubmit=async ev=>{ev.preventDefault();const button=ev.submitter;if(button)button.disabled=true;try{const focus=[...document.querySelectorAll('[data-ref-post-focus]:checked')].map(x=>x.value);await call('saveRefereeMatchPost',{eventId,complete:button?.dataset.complete==='true',matchPlayed:val('ref-post-played'),postRating:val('ref-post-rating'),postFocus:focus,postWentWell:val('ref-post-good'),postImprove:val('ref-post-improve'),postReviewSituations:val('ref-post-review'),postIncidents:val('ref-post-incidents'),postNotes:val('ref-post-notes')});showToast_(button?.dataset.complete==='true'?'Seguimiento arbitral completado.':'Borrador guardado.');await renderRefereeMatchWorkspace(eventId,'post');}catch(err){showMessage(userErrorText_(err),'error','referee-workflow-message');if(button)button.disabled=false;}};
@@ -2628,9 +2678,9 @@ async function renderEventDetail(eventId,requestedSection=''){
       content=eventAvailabilityPreviewHtml_(availabilityData,e)+(availabilityData?.isOpenForAvailability&&canManageEvent?'<div class="button-row"><button class="button primary" id="manage-availability-inline">Gestionar disponibilidad</button></div>':'');
     }
     const adminActions=canManageEvent?`<div class="button-row event-actions secondary-actions">${['PENDING','SCHEDULED'].includes(e.status)?'<button class="button secondary" id="edit-event">Editar</button>':''}${reportProtected?(e.status==='CANCELLED'?'<button class="button secondary" id="reactivate-activity">Reactivar</button>':''):((['PENDING','SCHEDULED'].includes(e.status))?'<button class="button secondary" id="cancel-activity">Cancelar actividad</button>':e.status==='CANCELLED'?'<button class="button secondary" id="reactivate-activity">Reactivar</button>':'')}${['PENDING','SCHEDULED'].includes(e.status)?'<button class="button secondary" id="postpone-activity">Postergar</button>':''}${e.status==='POSTPONED'?'<button class="button secondary" id="reschedule-event">Reprogramar</button>':''}${reportProtected||e.sourceType==='TRAINING_PLAN'?'':`<button class="button link danger-text" id="delete-event">Borrar</button>`}</div>`:'';
-    shell(`${header}<section class="panel match-detail-panel">${tabs}${e.notes?`<div class="match-note">${escapeHtml(e.notes)}</div>`:''}<div id="editor-host"></div><div class="event-section-host">${content}</div>${adminActions}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar');
+    shell(`${header}<section class="panel match-detail-panel">${tabs}${e.notes?`<div class="match-note">${escapeHtml(e.notes)}</div>`:''}<div id="editor-host"></div><div class="event-section-host">${content}</div>${adminActions}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar',`match:${eventId}`);
     wireEventWorkspaceTabs_(eventId,e,{attendanceExists:true});
-    document.getElementById('back-calendar').onclick=renderCalendar;const ma=document.getElementById('manage-availability-inline');if(ma)ma.onclick=()=>renderEventAvailability(eventId);
+    document.getElementById('back-calendar').onclick=()=>void navigateMain_('calendar',{restore:true});const ma=document.getElementById('manage-availability-inline');if(ma)ma.onclick=()=>renderEventAvailability(eventId);
     if(section==='plan'&&trainingPlanData&&!trainingPlanData.error)wireTrainingSessionPlan_(eventId,trainingPlanData);
     const eb=document.getElementById('edit-event');if(eb)eb.onclick=()=>renderEventEditor(eventId);
     const changeState=async(status,payload={})=>{try{await call('setEventState',Object.assign({eventId,status},payload));invalidateCalendarCaches_();await renderEventDetail(eventId);}catch(err){showMessage(err.message,'error');}};
@@ -2648,7 +2698,7 @@ async function renderEventDetail(eventId,requestedSection=''){
   const meta=(d.leagueMeta||[]).find(m=>m.eventId===eventId);
   const header=activityHeaderHtml_(e,meta);
   shell(`${header}<section class="panel match-detail-panel">${e.notes?`<div class="match-note">${escapeHtml(e.notes)}</div>`:''}<div class="button-row"><button class="button secondary" id="back-calendar">Volver al calendario</button></div></section>`,'calendar');
-  document.getElementById('back-calendar').onclick=renderCalendar;
+  document.getElementById('back-calendar').onclick=()=>void navigateMain_('calendar',{restore:true});
 }
 
 let leagueImportState=null;
@@ -2816,7 +2866,7 @@ function primeMatchPlanningCache_(eventId,section,data){if(!eventId||!data)retur
 function primeMatchShellCache_(eventId,data){if(!eventId||!data?.event)return;matchShellCache_.set(String(eventId),{at:Date.now(),data});}
 async function getMatchShellCached_(eventId,seed=null,force=false){
   const key=String(eventId),now=Date.now();if(seed?.event){primeMatchShellCache_(eventId,seed);return seed;}
-  const hit=matchShellCache_.get(key);if(!force&&hit&&now-hit.at<120000)return hit.data;
+  const hit=matchShellCache_.get(key);if(!force&&hit&&now-hit.at<CLIENT_HOT_CACHE_MS)return hit.data;
   const {data}=await call('getMatchShellData',{eventId});primeMatchShellCache_(eventId,data);return data;
 }
 function defaultMatchSectionFromShell_(data){const state=data?.matchState||{};return data?.defaultSection||((state.summaryVisible||state.summaryExists)?'summary':Number(state.lineupCount||0)>0?'convocados':'availability');}
@@ -2824,12 +2874,12 @@ function renderMatchShellFrame_(eventId,data,section){
   const e=data?.event;if(!e)return;const state=data.matchState||{},summaryExists=!!state.summaryExists,summaryVisible=!!state.summaryVisible;
   const planningHeader=matchHeaderHtml_(e,data.leagueMeta||data.meta||null,{compact:true});
   const tabs=eventWorkspaceTabsHtml_(e,section,{summaryExists,summaryVisible,attendanceExists:false,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&!!data.hasClubReferee});
-  shell(`${planningHeader}<section class="panel match-workspace-panel match-shell-hot">${tabs}<div class="event-section-host"><div class="empty-state"><strong>Cargando ${escapeHtml(section==='convocados'?'convocados':section==='availability'?'disponibilidad':section==='survey'?'encuesta':'resumen')}…</strong><br><small>La cabecera del partido ya está disponible; el detalle se carga sólo para esta sección.</small></div></div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div></section>`,'calendar');
+  shell(`${planningHeader}<section class="panel match-workspace-panel match-shell-hot">${tabs}<div class="event-section-host"><div class="empty-state"><strong>Cargando ${escapeHtml(section==='convocados'?'convocados':section==='availability'?'disponibilidad':section==='survey'?'encuesta':'resumen')}…</strong><br><small>La cabecera del partido ya está disponible; el detalle se carga sólo para esta sección.</small></div></div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div></section>`,'calendar',`match:${eventId}`);
   wireEventWorkspaceTabs_(eventId,e,{summaryExists,summaryVisible,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&!!data.hasClubReferee});
-  document.getElementById('planning-back')?.addEventListener('click',renderCalendar);
+  document.getElementById('planning-back')?.addEventListener('click',()=>void navigateMain_('calendar',{restore:true}));
 }
 async function getMatchPlanningCached_(eventId,section='summary',force=false){
-  const normalized=String(section||'summary'),key=String(eventId)+'|'+normalized,now=Date.now(),hit=matchPlanningCache_.get(key);if(!force&&hit&&now-hit.at<120000)return hit.data;
+  const normalized=String(section||'summary'),key=String(eventId)+'|'+normalized,now=Date.now(),hit=matchPlanningCache_.get(key);if(!force&&hit&&now-hit.at<CLIENT_HOT_CACHE_MS)return hit.data;
   const action=normalized==='summary'?'getMatchSummaryFast':normalized==='convocados'?'getMatchLineupFast':normalized==='survey'?'getMatchSurveyFast':'getMatchPlanningData';
   const payload=action==='getMatchPlanningData'?{eventId,section:normalized}:{eventId};
   const {data}=await call(action,payload);matchPlanningCache_.set(key,{at:Date.now(),data});return data;
@@ -2925,9 +2975,9 @@ async function renderMatchPlanning(eventId,requestedSection='auto',shellSeed=nul
     let content=section==='convocados'?lineupEditor:section==='survey'?surveyBlock:summaryBody;
     const planningHeader=matchHeaderHtml_(e,data.leagueMeta||data.meta||null,{compact:true});
     const tabs=eventWorkspaceTabsHtml_(e,section,{summaryExists:summaryExists,summaryVisible:summaryVisible,attendanceExists:false,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&eventHasClubRefereeClient_(eventId)});
-    shell(`${planningHeader}<section class="panel match-workspace-panel">${tabs}<div class="event-section-host">${content}</div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar');
+    shell(`${planningHeader}<section class="panel match-workspace-panel">${tabs}<div class="event-section-host">${content}</div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar',`match:${eventId}`);
     wireEventWorkspaceTabs_(eventId,e,{summaryExists:summaryExists,summaryVisible:summaryVisible,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&eventHasClubRefereeClient_(eventId)});
-    document.getElementById('planning-back').onclick=renderCalendar;
+    document.getElementById('planning-back').onclick=()=>void navigateMain_('calendar',{restore:true});
     const loadPrevious=document.getElementById('load-previous-lineup');if(loadPrevious)loadPrevious.onclick=()=>{if((data.lineup||[]).length&&!confirm('Esto reemplazará en pantalla la convocatoria actual por la del partido anterior. ¿Continuar?'))return;document.querySelectorAll('[data-lineup-person]').forEach(ch=>{const id=ch.dataset.lineupPerson,p=previousMap[id],order=document.querySelector(`[data-lineup-order="${id}"]`);ch.checked=!!p;if(p){const proposed=String(p.proposalOrderNo||p.orderNo||p.plannedOrderNo||'');if(order)order.value=lineupRoleForOrderClient_(proposed)?proposed:'';}else if(order)order.value='';});refreshLineupBuilder_();showToast_('Convocatoria anterior cargada como propuesta.');};
     const clearLineup=document.getElementById('clear-lineup');if(clearLineup)clearLineup.onclick=()=>{document.querySelectorAll('[data-lineup-person]').forEach(ch=>{const id=ch.dataset.lineupPerson;ch.checked=false;const order=document.querySelector(`[data-lineup-order="${id}"]`);if(order)order.value='';});refreshLineupBuilder_();showToast_('Propuesta limpiada.');};
     document.querySelectorAll('[data-lineup-person]').forEach(ch=>ch.addEventListener('change',refreshLineupBuilder_));document.querySelectorAll('[data-lineup-order]').forEach(sel=>sel.addEventListener('change',refreshLineupBuilder_));refreshLineupBuilder_();

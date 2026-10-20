@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.6.97';
+const FRONTEND_BUILD = '0.6.98';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -560,11 +560,53 @@ function navigationForRole() {
   });
 }
 
+function navIcon_(key){return ({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',exercises:'◇',statistics:'▥',users:'◎',seasons:'◫',settings:'⚙'})[key]||'•';}
 function navMarkup(active) {
   if (!currentUser) return '';
   return navigationForRole().map(([key,label]) =>
-    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${({home:'⌂',structure:'◆',families:'♙',documents:'▤',calendar:'▦',exercises:'◇',statistics:'▥',users:'◎',seasons:'◫',settings:'⚙'})[key] || '•'}</span><span class="nav-label">${label}</span></button>`
+    `<button class="nav-link ${active === key ? 'active' : ''}" data-nav="${key}"><span class="nav-icon">${navIcon_(key)}</span><span class="nav-label">${label}</span></button>`
   ).join('');
+}
+// 0.6.98 - navegación móvil intencional: tres destinos de uso frecuente + Más.
+// Administración, importaciones y biblioteca siguen accesibles, pero dejan de competir
+// por espacio con las tareas de campo (Inicio, Calendario y ámbito deportivo).
+function mobilePrimaryNavigation_(){
+  const items=navigationForRole(),byKey=Object.fromEntries(items.map(x=>[x[0],x]));
+  const role=String(contextRoleCategory_()||'').toUpperCase(),keys=['home'];
+  if(byKey.calendar)keys.push('calendar');
+  if(['REFEREE','REFEREE_COORDINATOR'].includes(role)&&byKey.statistics)keys.push('statistics');
+  else if(byKey.structure)keys.push('structure');
+  else if(byKey.documents)keys.push('documents');
+  else if(byKey.statistics)keys.push('statistics');
+  return keys.slice(0,3).map(k=>byKey[k]).filter(Boolean);
+}
+function mobileNavMarkup_(active){
+  const primary=mobilePrimaryNavigation_(),primaryKeys=new Set(primary.map(x=>x[0])),moreActive=!primaryKeys.has(active);
+  return primary.map(([key,label])=>`<button class="mobile-nav-link ${active===key?'active':''}" data-nav="${key}"><span aria-hidden="true">${navIcon_(key)}</span><small>${escapeHtml(label)}</small></button>`).join('')+`<button class="mobile-nav-link ${moreActive?'active':''}" id="mobile-more-toggle" type="button" aria-controls="mobile-more-sheet" aria-expanded="false"><span aria-hidden="true">•••</span><small>Más</small></button>`;
+}
+function mobileContextMarkup_(){
+  const seasons=seasonList_(),selected=selectedSeasonId_(),contexts=roleContexts_(),ctx=currentRoleContext_(),sim=simulationActive_()?simulationState.personId:'';
+  const season=`<label>Temporada<select id="mobile-season-select">${seasons.map(x=>`<option value="${escapeHtml(x.seasonId)}" ${x.seasonId===selected?'selected':''}>${escapeHtml(x.name)}${x.seasonId===seasonContext?.activeSeasonId?' · activa':''}</option>`).join('')}</select></label>`;
+  const context=contexts.length>1?`<label>Contexto<select id="mobile-role-context">${contexts.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===ctx.id?'selected':''}>${escapeHtml(x.label)}</option>`).join('')}</select></label>`:`<div class="mobile-context-readonly"><span>Contexto</span><strong>${escapeHtml(ctx.label||'Mi perfil')}</strong></div>`;
+  const simulation=realUserIsAdmin_()?`<label>Vista<select id="mobile-simulation-person"><option value="">Administrador</option>${(simulationCandidates||[]).map(x=>`<option value="${escapeHtml(x.personId)}" ${String(x.personId)===String(sim)?'selected':''}>${escapeHtml(x.displayName||x.email)}</option>`).join('')}</select></label>`:'';
+  return `${simulation}${season}${context}`;
+}
+function mobileMoreMarkup_(active){
+  const primaryKeys=new Set(mobilePrimaryNavigation_().map(x=>x[0]));
+  const secondary=navigationForRole().filter(([key])=>!primaryKeys.has(key));
+  return `<div class="mobile-more-backdrop" id="mobile-more-backdrop" hidden></div><aside class="mobile-more-sheet" id="mobile-more-sheet" hidden aria-label="Más opciones"><div class="mobile-sheet-handle"></div><div class="mobile-sheet-head"><div><span class="eyebrow">Gestión Club</span><h2>Más opciones</h2></div><button type="button" class="button ghost mobile-sheet-close" id="mobile-more-close" aria-label="Cerrar">×</button></div><div class="mobile-context-card">${mobileContextMarkup_()}</div><nav class="mobile-more-nav">${secondary.map(([key,label])=>`<button class="mobile-more-link ${active===key?'active':''}" data-nav="${key}"><span>${navIcon_(key)}</span><span><strong>${escapeHtml(label)}</strong>${key==='settings'?'<small>Administración · mejor en escritorio</small>':key==='exercises'?'<small>Biblioteca y planificación</small>':''}</span><b>›</b></button>`).join('')}</nav><button class="button secondary mobile-logout" id="mobile-logout" type="button">Cerrar sesión</button></aside>`;
+}
+function closeMobileMore_(){
+  document.getElementById('mobile-more-backdrop')?.setAttribute('hidden','');document.getElementById('mobile-more-sheet')?.setAttribute('hidden','');document.getElementById('mobile-more-toggle')?.setAttribute('aria-expanded','false');document.body.classList.remove('mobile-sheet-open');
+}
+function openMobileMore_(){
+  document.getElementById('mobile-more-backdrop')?.removeAttribute('hidden');document.getElementById('mobile-more-sheet')?.removeAttribute('hidden');document.getElementById('mobile-more-toggle')?.setAttribute('aria-expanded','true');document.body.classList.add('mobile-sheet-open');
+}
+function wireMobileChrome_(active){
+  document.getElementById('mobile-more-toggle')?.addEventListener('click',openMobileMore_);document.getElementById('mobile-more-close')?.addEventListener('click',closeMobileMore_);document.getElementById('mobile-more-backdrop')?.addEventListener('click',closeMobileMore_);document.getElementById('mobile-logout')?.addEventListener('click',()=>{closeMobileMore_();logout();});
+  document.getElementById('mobile-season-select')?.addEventListener('change',async e=>{resetSeasonScopedUi_(e.target.value);await refreshAccessProfileForSeason_();resetContextScopedUi_();closeMobileMore_();rerenderForSeason_(active);});
+  document.getElementById('mobile-role-context')?.addEventListener('change',e=>{saveRoleContextId_(e.target.value);resetContextScopedUi_();closeMobileMore_();showToast_('Contexto cambiado a '+(currentRoleContext_().label||'la vista seleccionada')+'.','success',1800);rerenderForContext_(active);});
+  document.getElementById('mobile-simulation-person')?.addEventListener('change',e=>{closeMobileMore_();activateSimulation_(e.target.value);});
 }
 
 function dashboardCardsForRole() {
@@ -596,6 +638,23 @@ function accessScopeOverviewHtml_(){
 
 function isMobileViewport(){ return window.matchMedia && window.matchMedia('(max-width: 760px)').matches; }
 
+// Convierte tablas operativas pequeñas en tarjetas legibles en teléfono sin tocar
+// el HTML de escritorio. Las tablas técnicas/monitorización conservan scroll horizontal.
+let mobileEnhanceQueued_=false;
+function enhanceMobileTables_(){
+  if(!isMobileViewport())return;
+  root.querySelectorAll('.table-wrap table:not(.performance-table)').forEach(table=>{
+    if(table.dataset.mobileEnhanced==='1')return;
+    const headers=[...table.querySelectorAll('thead th')].map(x=>String(x.textContent||'').trim());
+    if(!headers.length||headers.length>7)return;
+    table.dataset.mobileEnhanced='1';table.classList.add('mobile-card-table');table.closest('.table-wrap')?.classList.add('mobile-card-wrap');
+    table.querySelectorAll('tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>{if(cell.tagName==='TD'&&!cell.hasAttribute('colspan'))cell.dataset.label=headers[i]||'';}));
+  });
+}
+function scheduleMobileEnhance_(){if(mobileEnhanceQueued_)return;mobileEnhanceQueued_=true;requestAnimationFrame(()=>{mobileEnhanceQueued_=false;enhanceMobileTables_();});}
+const mobileEnhanceObserver_=new MutationObserver(()=>scheduleMobileEnhance_());mobileEnhanceObserver_.observe(root,{childList:true,subtree:true});
+window.addEventListener('resize',scheduleMobileEnhance_,{passive:true});
+
 function shell(content, active = 'home') {
   root.className = '';
   document.body.classList.toggle('login-mode', !currentUser);
@@ -607,7 +666,7 @@ function shell(content, active = 'home') {
       ${currentUser ? roleContextSwitcherMarkup_() : ''}
       ${currentUser ? `<div class="session"><div class="session-copy"><span>${escapeHtml(currentUser.displayName||currentUser.email)}</span><small>${escapeHtml(simulationSessionSubtext_())}</small></div><button class="button ghost logout-button" id="logout">Salir</button></div>` : ''}
     </header>
-    ${currentUser ? `<nav class="nav">${navMarkup(active)}</nav>` : ''}
+    ${currentUser ? `<nav class="nav desktop-nav">${navMarkup(active)}</nav><nav class="mobile-bottom-nav" aria-label="Navegación móvil">${mobileNavMarkup_(active)}</nav>${mobileMoreMarkup_(active)}` : ''}
     ${currentUser ? simulationBannerMarkup_() : ''}
     <main class="container">${content}</main>
     <footer>Gestión Club ${escapeHtml(config.appVersion || '')}${String(config.appVersion||'')!==FRONTEND_BUILD?` · frontend ${escapeHtml(FRONTEND_BUILD)}`:''} · entorno ${escapeHtml(config.environment || '')}</footer>`;
@@ -618,8 +677,10 @@ function shell(content, active = 'home') {
   const simulationActions=document.getElementById('simulation-allow-actions');if(simulationActions)simulationActions.onchange=()=>{simulationState.allowActions=!!simulationActions.checked;const modeText=document.getElementById('simulation-mode-text');if(modeText)modeText.textContent=simulationState.allowActions?'Acciones de prueba habilitadas':'Solo lectura';showToast_(simulationState.allowActions?'Acciones de prueba habilitadas. Quedarán auditadas con el administrador real.':'Simulación en solo lectura.','warning',3200);};
   const seasonSelect=document.getElementById('global-season-select');if(seasonSelect)seasonSelect.onchange=async()=>{resetSeasonScopedUi_(seasonSelect.value);await refreshAccessProfileForSeason_();resetContextScopedUi_();rerenderForSeason_(active);};
   const roleContextSelect=document.getElementById('global-role-context');if(roleContextSelect)roleContextSelect.onchange=()=>{saveRoleContextId_(roleContextSelect.value);resetContextScopedUi_();showToast_('Contexto cambiado a '+(currentRoleContext_().label||'la vista seleccionada')+'.','success',1800);rerenderForContext_(active);};
+  wireMobileChrome_(active);
   document.querySelectorAll('[data-nav]').forEach(button => {
     button.onclick = () => {
+      closeMobileMore_();
       const nav=button.dataset.nav;
       if(nav==='settings') return renderClubSettings();
       if(nav==='structure') return renderStructure();
@@ -2039,8 +2100,9 @@ async function renderStatistics(filters={}){
     const teamOptions=`<option value="">Todos los equipos</option>`+(data.teams||[]).filter(t=>!f.divisionId||t.divisionId===f.divisionId).map(t=>`<option value="${escapeHtml(t.teamId)}" ${f.teamId===t.teamId?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
     const tabLabels={summary:'Resumen',players:data.access?.selfOnly?'Mi temporada':'Jugadores',training:'Entrenamientos',matches:'Partidos',comparison:'Comparativa'};
     const tabs=allowedTabs.map(tab=>`<button type="button" class="stats-tab ${activeTab===tab?'active':''}" data-stats-tab="${tab}">${tabLabels[tab]}</button>`).join('');
-    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento · Estadísticas 2.0</span><h1>Estadísticas</h1><p>${data.access?.selfOnly?'Tu temporada deportiva, asistencia y participación real.':'Asistencia, disponibilidad, convocatorias, participación y resultados con trazabilidad.'}</p>${currentAccessProfile_().isAdmin?'<div class="button-row"><button class="button secondary" id="stats-open-referee">Ver estadísticas arbitrales</button></div>':''}</section><section class="panel stats-filter-panel"><div class="form-grid four"><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label><label>Desde<input id="stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label></div><div class="button-row stats-filter-actions"><button class="button secondary" id="stats-clear">Limpiar período</button></div></section>${statsQualityMarkup_(data)}<nav class="stats-tabs" aria-label="Secciones de estadísticas">${tabs}</nav><div id="stats-tab-host">${statsTabBody_(activeTab,data,divMap,teamMap)}</div>`,'statistics');
+    shell(`<section class="hero compact"><span class="eyebrow">Rendimiento · Estadísticas 2.0</span><h1>Estadísticas</h1><p>${data.access?.selfOnly?'Tu temporada deportiva, asistencia y participación real.':'Asistencia, disponibilidad, convocatorias, participación y resultados con trazabilidad.'}</p>${currentAccessProfile_().isAdmin?'<div class="button-row desktop-preferred-action"><button class="button secondary" id="stats-open-referee">Ver estadísticas arbitrales</button></div>':''}</section><button type="button" class="button secondary mobile-only mobile-filter-trigger" id="stats-filter-toggle">Filtros</button><section class="panel stats-filter-panel mobile-filter-panel"><div class="form-grid four"><label>División<select id="stats-division">${divisionOptions}</select></label><label>Equipo<select id="stats-team">${teamOptions}</select></label><label>Desde<input id="stats-from" type="date" value="${escapeHtml(f.fromDate||'')}"></label><label>Hasta<input id="stats-to" type="date" value="${escapeHtml(f.toDate||'')}"></label></div><div class="button-row stats-filter-actions"><button class="button secondary" id="stats-clear">Limpiar período</button></div></section>${statsQualityMarkup_(data)}<nav class="stats-tabs" aria-label="Secciones de estadísticas">${tabs}</nav><div id="stats-tab-host">${statsTabBody_(activeTab,data,divMap,teamMap)}</div>`,'statistics');
     document.getElementById('stats-open-referee')?.addEventListener('click',()=>{saveUiStatePatch_({statisticsMode:'referee'});renderStatistics();});
+    const statsFilterToggle=document.getElementById('stats-filter-toggle'),statsFilterPanel=document.querySelector('.stats-filter-panel');if(statsFilterToggle&&statsFilterPanel){statsFilterToggle.setAttribute('aria-expanded','false');statsFilterToggle.onclick=()=>{const open=statsFilterPanel.classList.toggle('mobile-open');statsFilterToggle.setAttribute('aria-expanded',open?'true':'false');statsFilterToggle.textContent=open?'Ocultar filtros':'Filtros';};}
     const collect=()=>({seasonId:selectedSeasonId_(),divisionId:val('stats-division'),teamId:val('stats-team'),fromDate:val('stats-from'),toDate:val('stats-to')});const reload=()=>{const next=collect();saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};
     ['stats-team','stats-from','stats-to'].forEach(id=>document.getElementById(id).onchange=reload);document.getElementById('stats-division').onchange=()=>{const next=collect();next.teamId='';saveUiStatePatch_({statisticsFilters:next});renderStatistics(next);};document.getElementById('stats-clear').onclick=()=>{const div=contextSingleDivisionId_();saveUiStatePatch_({statisticsFilters:{seasonId:selectedSeasonId_(),divisionId:div,teamId:'',fromDate:'',toDate:''}});renderStatistics({seasonId:selectedSeasonId_(),divisionId:div});};
     document.querySelectorAll('[data-stats-tab]').forEach(b=>b.onclick=()=>{saveUiStatePatch_({statisticsTab:b.dataset.statsTab});renderStatistics();});wireStatsBody_(activeTab,data);
@@ -2086,14 +2148,16 @@ async function renderCalendar(forceReload=false){
   if(!calendarViewTouched&&loadUiState_().calendarView)calendarView=loadUiState_().calendarView;
   const monthLabel=calendarCursor.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
   const reportSet=new Set(d.matchReportEventIds||[]);
-  const renderCurrentCalendar=(events)=>calendarView==='month'?renderMonthGrid(events):calendarView==='week'?renderWeekGrid(events):renderAgenda(events);
-  shell(`<section class="hero compact"><span class="eyebrow">Actividad deportiva</span><h1>Calendario</h1><p>Entrenamientos y partidos en una única vista.</p>${(currentRoleContext_()?.roleCategory==='REFEREE_COORDINATOR'||currentAccessProfile_().isAdmin)?'<div class="button-row"><button class="button secondary" id="open-referee-coordination">Designaciones de árbitros</button></div>':''}</section>
-  <section class="panel"><div class="calendar-toolbar"><div class="button-row"><button class="button secondary" id="cal-prev">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row"><button class="button ${calendarView==='agenda'?'primary':'secondary'}" id="cal-agenda">Agenda</button><button class="button ${calendarView==='month'?'primary':'secondary'}" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'}" id="cal-week">Semana</button>${d.canManageCompetitions?'<button class="button secondary" id="manage-competitions">Actualizar desde WEB</button>':''}${d.canImportLeague?'<button class="button secondary" id="manual-load">Carga manual</button>':''}${d.canCreate?'<button class="button primary" id="new-event">Nueva actividad</button>':''}</div></div>
-  <div class="filter-bar calendar-filters"><label>División<select id="cal-filter-division"><option value="">Todas las divisiones</option>${(d.divisions||[]).filter(x=>contextAllowsDivisionId_(x.divisionId)).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${state.divisionId===x.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></label><label id="cal-filter-team-wrap">Equipo<select id="cal-filter-team"><option value="">Todos los equipos</option></select></label><label>Competición<select id="cal-filter-competition"><option value="">Todas las competiciones</option>${(d.competitions||[]).filter(c=>c.status==='ACTIVE'||state.competitionId===c.competitionId).map(c=>`<option value="${escapeHtml(c.competitionId)}" ${state.competitionId===c.competitionId?'selected':''}>${escapeHtml(competitionDisplayNameClient_(c))}</option>`).join('')}</select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING" ${state.type==='TRAINING'?'selected':''}>Entrenamientos</option><option value="MATCH" ${state.type==='MATCH'?'selected':''}>Partidos</option><option value="REST" ${state.type==='REST'?'selected':''}>Descansos</option><option value="RECOVERY" ${state.type==='RECOVERY'?'selected':''}>Jornadas de recuperación</option></select></label><label>Estado<select id="cal-filter-status"><option value="">Todos</option>${['PENDING','SCHEDULED','IN_PROGRESS','COMPLETED','POSTPONED','CANCELLED'].map(x=>`<option value="${x}" ${state.status===x?'selected':''}>${escapeHtml(eventStatusLabel(x))}</option>`).join('')}</select></label><label>Acta<select id="cal-filter-report"><option value="">Todas</option><option value="WITH" ${state.report==='WITH'?'selected':''}>Con acta</option><option value="WITHOUT" ${state.report==='WITHOUT'?'selected':''}>Sin acta</option></select></label><label class="filter-grow">Rival / título<input id="cal-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Buscar partido o rival"></label><button class="button secondary filter-clear" id="cal-filter-clear">Limpiar</button></div>
+  const renderCurrentCalendar=(events)=>{const effectiveView=isMobileViewport()?'agenda':calendarView;return effectiveView==='month'?renderMonthGrid(events):effectiveView==='week'?renderWeekGrid(events):renderAgenda(events);};
+  const activeFilterCount=['divisionId','teamId','competitionId','type','status','report','q'].filter(k=>String(state[k]||'').trim()).length;
+  shell(`<section class="hero compact mobile-calendar-hero"><span class="eyebrow">Actividad deportiva</span><h1>Calendario</h1><p>Entrenamientos y partidos en una única vista.</p>${(currentRoleContext_()?.roleCategory==='REFEREE_COORDINATOR'||currentAccessProfile_().isAdmin)?'<div class="button-row desktop-preferred-action"><button class="button secondary" id="open-referee-coordination">Designaciones de árbitros</button></div>':''}</section>
+  <section class="panel calendar-panel"><div class="calendar-toolbar"><div class="button-row calendar-date-nav"><button class="button secondary" id="cal-prev" aria-label="Período anterior">‹</button><button class="button secondary" id="cal-today">Hoy</button><button class="button secondary" id="cal-next" aria-label="Período siguiente">›</button></div><h2>${escapeHtml(monthLabel)}</h2><div class="button-row calendar-view-actions"><button class="button ${calendarView==='agenda'?'primary':'secondary'} desktop-calendar-view" id="cal-agenda">Agenda</button><button class="button ${calendarView==='month'?'primary':'secondary'} desktop-calendar-view" id="cal-month">Mes</button><button class="button ${calendarView==='week'?'primary':'secondary'} desktop-calendar-view" id="cal-week">Semana</button><button class="button secondary mobile-only" id="cal-filter-toggle" type="button">Filtros${activeFilterCount?` · ${activeFilterCount}`:''}</button>${d.canManageCompetitions?'<button class="button secondary calendar-admin-action" id="manage-competitions">Actualizar WEB</button>':''}${d.canImportLeague?'<button class="button secondary calendar-admin-action" id="manual-load">Carga manual</button>':''}${d.canCreate?'<button class="button primary calendar-create-action" id="new-event">Nueva actividad</button>':''}</div></div>
+  <div class="filter-bar calendar-filters mobile-filter-panel"><label>División<select id="cal-filter-division"><option value="">Todas las divisiones</option>${(d.divisions||[]).filter(x=>contextAllowsDivisionId_(x.divisionId)).map(x=>`<option value="${escapeHtml(x.divisionId)}" ${state.divisionId===x.divisionId?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></label><label id="cal-filter-team-wrap">Equipo<select id="cal-filter-team"><option value="">Todos los equipos</option></select></label><label>Competición<select id="cal-filter-competition"><option value="">Todas las competiciones</option>${(d.competitions||[]).filter(c=>c.status==='ACTIVE'||state.competitionId===c.competitionId).map(c=>`<option value="${escapeHtml(c.competitionId)}" ${state.competitionId===c.competitionId?'selected':''}>${escapeHtml(competitionDisplayNameClient_(c))}</option>`).join('')}</select></label><label>Tipo<select id="cal-filter-type"><option value="">Todos</option><option value="TRAINING" ${state.type==='TRAINING'?'selected':''}>Entrenamientos</option><option value="MATCH" ${state.type==='MATCH'?'selected':''}>Partidos</option><option value="REST" ${state.type==='REST'?'selected':''}>Descansos</option><option value="RECOVERY" ${state.type==='RECOVERY'?'selected':''}>Jornadas de recuperación</option></select></label><label>Estado<select id="cal-filter-status"><option value="">Todos</option>${['PENDING','SCHEDULED','IN_PROGRESS','COMPLETED','POSTPONED','CANCELLED'].map(x=>`<option value="${x}" ${state.status===x?'selected':''}>${escapeHtml(eventStatusLabel(x))}</option>`).join('')}</select></label><label>Acta<select id="cal-filter-report"><option value="">Todas</option><option value="WITH" ${state.report==='WITH'?'selected':''}>Con acta</option><option value="WITHOUT" ${state.report==='WITHOUT'?'selected':''}>Sin acta</option></select></label><label class="filter-grow">Rival / título<input id="cal-filter-q" value="${escapeHtml(state.q||'')}" placeholder="Buscar partido o rival"></label><button class="button secondary filter-clear" id="cal-filter-clear">Limpiar</button></div>
   <div id="calendar-host"></div><div id="message" class="message"></div></section>`,'calendar');
   const move=n=>{calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+(calendarView==='month'?n:0),calendarCursor.getDate()+((calendarView==='week'||calendarView==='agenda')?7*n:0));renderCalendar();};
   document.getElementById('cal-prev').onclick=()=>move(-1);document.getElementById('cal-next').onclick=()=>move(1);document.getElementById('cal-today').onclick=()=>{calendarCursor=new Date();renderCalendar();};
   document.getElementById('cal-agenda').onclick=()=>{calendarViewTouched=true;calendarView='agenda';saveUiStatePatch_({calendarView});renderCalendar();};document.getElementById('cal-month').onclick=()=>{calendarViewTouched=true;calendarView='month';saveUiStatePatch_({calendarView});renderCalendar();};document.getElementById('cal-week').onclick=()=>{calendarViewTouched=true;calendarView='week';saveUiStatePatch_({calendarView});renderCalendar();};
+  const filterToggle=document.getElementById('cal-filter-toggle'),filterPanel=document.querySelector('.calendar-filters');if(filterToggle&&filterPanel){filterToggle.setAttribute('aria-expanded','false');filterToggle.onclick=()=>{const open=filterPanel.classList.toggle('mobile-open');filterToggle.setAttribute('aria-expanded',open?'true':'false');filterToggle.textContent=(open?'Ocultar filtros':'Filtros')+(activeFilterCount?` · ${activeFilterCount}`:'');};}
   const cb=document.getElementById('manage-competitions');if(cb)cb.onclick=renderCompetitions;const ml=document.getElementById('manual-load');if(ml)ml.onclick=renderManualLoad_;const nb=document.getElementById('new-event');if(nb)nb.onclick=()=>renderEventEditor();
   document.getElementById('open-referee-coordination')?.addEventListener('click',renderRefereeCoordination_);
   const teamWrap=document.getElementById('cal-filter-team-wrap'),teamSelect=document.getElementById('cal-filter-team');

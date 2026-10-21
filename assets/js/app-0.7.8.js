@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.7.7';
+const FRONTEND_BUILD = '0.7.8';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -2934,13 +2934,23 @@ async function getMatchShellCached_(eventId,seed=null,force=false){
   const {data}=await call('getMatchShellData',{eventId});primeMatchShellCache_(eventId,data);return data;
 }
 function defaultMatchSectionFromShell_(data){const state=data?.matchState||{};return data?.defaultSection||((state.summaryVisible||state.summaryExists)?'summary':Number(state.lineupCount||0)>0?'convocados':'availability');}
+function matchDeleteAllowed_(data){
+  const e=data?.event||{},hasOfficialReport=!!data?.matchState?.hasOfficialReport||(data?.reports||[]).some(r=>!!String(r?.fileId||'').trim());
+  return !!data?.canManageEvent&&!hasOfficialReport&&String(e.sourceType||'').toUpperCase()!=='TRAINING_PLAN';
+}
+function matchDeleteButtonHtml_(data){return matchDeleteAllowed_(data)?'<button class="button link danger-text" id="delete-match-event">Borrar partido</button>':'';}
+function wireMatchDelete_(eventId,data){
+  const btn=document.getElementById('delete-match-event');if(!btn)return;
+  btn.onclick=async()=>{if(!confirm('¿Borrar definitivamente este partido y todos sus datos asociados? Esta acción no se puede deshacer.'))return;btn.disabled=true;try{await call('deleteEvent',{eventId});invalidateMatchPlanningCache_(eventId);invalidateCalendarCaches_();showToast_('Partido eliminado.','success');await navigateMain_('calendar',{restore:false});}catch(err){showMessage(err.message,'error');btn.disabled=false;}};
+}
 function renderMatchShellFrame_(eventId,data,section){
   const e=data?.event;if(!e)return;const state=data.matchState||{},summaryExists=!!state.summaryExists,summaryVisible=!!state.summaryVisible;
   const planningHeader=matchHeaderHtml_(e,data.leagueMeta||data.meta||null,{compact:true});
   const tabs=eventWorkspaceTabsHtml_(e,section,{summaryExists,summaryVisible,attendanceExists:false,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&!!data.hasClubReferee});
-  shell(`${planningHeader}<section class="panel match-workspace-panel match-shell-hot">${tabs}<div class="event-section-host"><div class="empty-state"><strong>Cargando ${escapeHtml(section==='convocados'?'convocados':section==='availability'?'disponibilidad':section==='survey'?'encuesta':'resumen')}…</strong><br><small>La cabecera del partido ya está disponible; el detalle se carga sólo para esta sección.</small></div></div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div></section>`,'calendar',`match:${eventId}`);
+  shell(`${planningHeader}<section class="panel match-workspace-panel match-shell-hot">${tabs}<div class="event-section-host"><div class="empty-state"><strong>Cargando ${escapeHtml(section==='convocados'?'convocados':section==='availability'?'disponibilidad':section==='survey'?'encuesta':'resumen')}…</strong><br><small>La cabecera del partido ya está disponible; el detalle se carga sólo para esta sección.</small></div></div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button>${matchDeleteButtonHtml_(data)}</div></section>`,'calendar',`match:${eventId}`);
   wireEventWorkspaceTabs_(eventId,e,{summaryExists,summaryVisible,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&!!data.hasClubReferee});
   document.getElementById('planning-back')?.addEventListener('click',()=>void navigateMain_('calendar',{restore:true}));
+  wireMatchDelete_(eventId,data);
 }
 async function getMatchPlanningCached_(eventId,section='summary',force=false){
   const normalized=String(section||'summary'),key=String(eventId)+'|'+normalized,now=Date.now(),hit=matchPlanningCache_.get(key);if(!force&&hit&&now-hit.at<CLIENT_HOT_CACHE_MS)return hit.data;
@@ -3039,9 +3049,10 @@ async function renderMatchPlanning(eventId,requestedSection='auto',shellSeed=nul
     let content=section==='convocados'?lineupEditor:section==='survey'?surveyBlock:summaryBody;
     const planningHeader=matchHeaderHtml_(e,data.leagueMeta||data.meta||null,{compact:true});
     const tabs=eventWorkspaceTabsHtml_(e,section,{summaryExists:summaryExists,summaryVisible:summaryVisible,attendanceExists:false,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&eventHasClubRefereeClient_(eventId)});
-    shell(`${planningHeader}<section class="panel match-workspace-panel">${tabs}<div class="event-section-host">${content}</div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button></div><div id="message" class="message"></div></section>`,'calendar',`match:${eventId}`);
+    shell(`${planningHeader}<section class="panel match-workspace-panel">${tabs}<div class="event-section-host">${content}</div><div class="button-row"><button class="button secondary" id="planning-back">Volver al calendario</button>${matchDeleteButtonHtml_(data)}</div><div id="message" class="message"></div></section>`,'calendar',`match:${eventId}`);
     wireEventWorkspaceTabs_(eventId,e,{summaryExists:summaryExists,summaryVisible:summaryVisible,officialLinks:!!currentAccessProfile_().capabilities?.manageCompetitions,refereeView:!!currentAccessProfile_().isAdmin&&eventHasClubRefereeClient_(eventId)});
     document.getElementById('planning-back').onclick=()=>void navigateMain_('calendar',{restore:true});
+    wireMatchDelete_(eventId,data);
     const loadPrevious=document.getElementById('load-previous-lineup');if(loadPrevious)loadPrevious.onclick=()=>{if((data.lineup||[]).length&&!confirm('Esto reemplazará en pantalla la convocatoria actual por la del partido anterior. ¿Continuar?'))return;document.querySelectorAll('[data-lineup-person]').forEach(ch=>{const id=ch.dataset.lineupPerson,p=previousMap[id],order=document.querySelector(`[data-lineup-order="${id}"]`);ch.checked=!!p;if(p){const proposed=String(p.proposalOrderNo||p.orderNo||p.plannedOrderNo||'');if(order)order.value=lineupRoleForOrderClient_(proposed)?proposed:'';}else if(order)order.value='';});refreshLineupBuilder_();showToast_('Convocatoria anterior cargada como propuesta.');};
     const clearLineup=document.getElementById('clear-lineup');if(clearLineup)clearLineup.onclick=()=>{document.querySelectorAll('[data-lineup-person]').forEach(ch=>{const id=ch.dataset.lineupPerson;ch.checked=false;const order=document.querySelector(`[data-lineup-order="${id}"]`);if(order)order.value='';});refreshLineupBuilder_();showToast_('Propuesta limpiada.');};
     document.querySelectorAll('[data-lineup-person]').forEach(ch=>ch.addEventListener('change',refreshLineupBuilder_));document.querySelectorAll('[data-lineup-order]').forEach(sel=>sel.addEventListener('change',refreshLineupBuilder_));refreshLineupBuilder_();

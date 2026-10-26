@@ -1,4 +1,4 @@
-const FRONTEND_BUILD = '0.7.25';
+const FRONTEND_BUILD = '0.7.27';
 const config = window.APP_BOOTSTRAP || {};
 const publicBranding = config.branding || {};
 const root = document.getElementById('app');
@@ -486,6 +486,8 @@ function contextScopedDivisionId_(stored){
 }
 function contextAllowsDivisionId_(divisionId){const ids=contextDivisionIds_();return !ids.length||ids.includes(String(divisionId||''));}
 function isExternalRefereeMatchClient_(event){return String(event?.eventType||'').toUpperCase()==='MATCH'&&String(event?.matchType||'').toUpperCase()==='REFEREE_EXTERNAL';}
+function isCompetitionContextMatchClient_(event){return String(event?.eventType||'').toUpperCase()==='MATCH'&&String(event?.matchType||'').toUpperCase()==='COMPETITION_CONTEXT';}
+function isNonClubCompetitionMatchClient_(event){return isExternalRefereeMatchClient_(event)||isCompetitionContextMatchClient_(event);}
 function eventClubRefereeParticipantClient_(eventId,data=calendarData){return (data?.participants||[]).find(p=>String(p.eventId||'')===String(eventId||'')&&String(p.roleCategory||p.participantType||'').toUpperCase()==='REFEREE')||null;}
 function eventHasClubRefereeClient_(eventId,data=calendarData){return !!eventClubRefereeParticipantClient_(eventId,data);}
 function shouldUseRefereeWorkspaceClient_(event,data=calendarData){if(!event||String(event.eventType||'').toUpperCase()!=='MATCH'||!eventHasClubRefereeClient_(event.eventId,data))return false;if(isExternalRefereeMatchClient_(event))return true;const role=contextRoleCategory_().toUpperCase();if(role==='REFEREE')return contextEventIds_().includes(String(event.eventId||''));return role==='REFEREE_COORDINATOR';}
@@ -2020,7 +2022,7 @@ function mixHexColor_(base,target,amount){
 }
 function divisionColorVariants_(base){const c=normalizeHexColor_(base);return {strong:mixHexColor_(c,'#000000',.12),medium:mixHexColor_(c,'#FFFFFF',.46),light:mixHexColor_(c,'#FFFFFF',.82)};}
 function divisionEventStyle_(e){const base=divisionColorForEvent_(e),v=divisionColorVariants_(base);return `--division-color:${escapeHtml(base)};--division-strong:${escapeHtml(v.strong)};--division-medium:${escapeHtml(v.medium)};--division-light:${escapeHtml(v.light)}`;}
-function teamPatternForEvent_(e){if(isExternalRefereeMatchClient_(e)||e.eventType==='TRAINING'||!e.teamId)return 'SOLID';if(e?.teamPattern)return e.teamPattern;const t=(calendarData?.teams||[]).find(x=>x.teamId===e.teamId);return t?.displayPattern||'SOLID';}
+function teamPatternForEvent_(e){if(isNonClubCompetitionMatchClient_(e)||e.eventType==='TRAINING'||!e.teamId)return 'SOLID';if(e?.teamPattern)return e.teamPattern;const t=(calendarData?.teams||[]).find(x=>x.teamId===e.teamId);return t?.displayPattern||'SOLID';}
 function teamPatternClass_(e){const p=teamPatternForEvent_(e);return p==='STRIPED'?'team-pattern-striped':p==='DOTTED'?'team-pattern-dotted':'team-pattern-solid';}
 function eventStatusLabel(s){return ({PENDING:'Pendiente',SCHEDULED:'Programado',IN_PROGRESS:'En curso',COMPLETED:'Finalizado',CANCELLED:'Cancelado',POSTPONED:'Postergado'})[s]||s;}
 function competitionTypeLabelClient_(t){return ({LEAGUE:'Liga',CUP:'Copa',TOURNAMENT:'Torneo',FRIENDLY:'Amistoso',OTHER:'Otro'})[t]||t||'Liga';}
@@ -2037,7 +2039,7 @@ function competitionLinkButtons_(competition,event=null){
   if(event?.officialReportUrl)links.push(externalLinkButton_(event.officialReportUrl,'Acta oficial','primary'));
   return links.filter(Boolean).join('');
 }
-function calendarEventLine(e){const time=displayEventTime_(e),tm=time?` · ${escapeHtml(time)}`:'',opp=e.eventType==='MATCH'&&e.opponent?` · vs ${escapeHtml(e.opponent)}`:'',ref=isExternalRefereeMatchClient_(e)?' · Árbitro FAR':'';return `<button class="calendar-event ${eventVisualClass_(e)} ${teamPatternClass_(e)} status-${String(e.status||'').toLowerCase()}" style="${divisionEventStyle_(e)}" data-open-event="${e.eventId}"><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${tm}${opp}${ref}</small></button>`;}
+function calendarEventLine(e){const time=displayEventTime_(e),tm=time?` · ${escapeHtml(time)}`:'',opp=e.eventType==='MATCH'&&e.opponent?` · vs ${escapeHtml(e.opponent)}`:'',extra=isExternalRefereeMatchClient_(e)?' · Árbitro FAR':isCompetitionContextMatchClient_(e)?' · Triangular FAR':'';return `<button class="calendar-event ${eventVisualClass_(e)} ${teamPatternClass_(e)} status-${String(e.status||'').toLowerCase()}" style="${divisionEventStyle_(e)}" data-open-event="${e.eventId}"><strong>${escapeHtml(e.title||eventTypeLabel(e.eventType))}</strong><small>${tm}${opp}${extra}</small></button>`;}
 function pendingFarFixturesHtml_(events){
   const rows=(events||[]).map(e=>`<tr><td><strong>${escapeHtml(e.title||'Partido FAR')}</strong><small>${escapeHtml(e.competition||'FAR / MatchReady')}</small></td><td>${escapeHtml(e.opponent||'—')}</td><td><span class="status-pill warning">Fecha pendiente FAR</span>${isExternalRefereeMatchClient_(e)?'<small>Designación arbitral</small>':''}</td><td><button class="button mini secondary" data-open-event="${escapeHtml(e.eventId)}">Ver</button></td></tr>`).join('');
   if(!rows)return '';
@@ -2959,6 +2961,12 @@ async function renderRefereeMatchWorkspace(eventId,requestedSection='summary'){
   }catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar el área arbitral</h1><p>${escapeHtml(userErrorText_(err))}</p><button class="button secondary" id="referee-workspace-error-back">Volver</button></section>`,'calendar');document.getElementById('referee-workspace-error-back')?.addEventListener('click',renderCalendar);}
 }
 
+function renderCompetitionContextMatch_(event,detailHeader=null){
+  const e=event||{},meta=detailHeader?.leagueMeta||(calendarData?.leagueMeta||[]).find(m=>String(m.eventId||'')===String(e.eventId||''))||{},duration=Number(e.matchDurationMinutes||0),half=Number(e.halfDurationMinutes||0);
+  shell(`<section class="hero compact"><span class="eyebrow">${escapeHtml(e.competition||'FAR / MatchReady')}</span><h1>${escapeHtml(e.title||'Partido del triangular')}</h1><p>Partido de contexto de la jornada. Se muestra para conservar el triangular completo y no genera convocatoria, Wellness ni estadísticas deportivas de Marbella.</p></section><section class="panel"><div class="panel-heading"><div><h2>${escapeHtml(e.matchFormat==='TRIANGULAR'?'Triangular':'Jornada FAR')}</h2><p>${escapeHtml(meta.roundName||e.notes||'')}</p></div><button class="button secondary" id="context-match-back">Volver al calendario</button></div><div class="info-grid"><div><span>Fecha</span><strong>${escapeHtml(e.eventDate||'—')}</strong></div><div><span>Hora</span><strong>${escapeHtml(displayEventTime_(e)||'Pendiente')}</strong></div><div><span>Duración</span><strong>${duration?`${duration} min${half?` · ${half} min/tiempo`:''}`:'Pendiente de regla de división'}</strong></div><div><span>Árbitro FAR</span><strong>${escapeHtml(meta.refereeName||'Pendiente')}</strong></div><div><span>Campo</span><strong>${escapeHtml(e.location||'—')}</strong></div><div><span>Formato</span><strong>${escapeHtml(e.matchFormat||'—')}</strong></div></div></section>`,'calendar');
+  document.getElementById('context-match-back')?.addEventListener('click',renderCalendar);
+}
+
 async function renderEventDetail(eventId,requestedSection=''){
   let d=calendarData,e=d?.events?.find(x=>x.eventId===eventId)||null,detailHeader=null;
   const fullCalendarReady=!!(d&&Date.now()-calendarDataLoadedAt_<=60000&&Array.isArray(d.persons)&&e);
@@ -2969,8 +2977,9 @@ async function renderEventDetail(eventId,requestedSection=''){
     try{detailHeader=(await call('getEventDetailHeaderData',{eventId})).data;e=detailHeader.event;}catch(err){shell(`<section class="panel narrow"><h1>No se pudo cargar la actividad</h1><p>${escapeHtml(userErrorText_(err))}</p><button class="button secondary" id="event-fast-error-back">Volver</button></section>`,'calendar');document.getElementById('event-fast-error-back')?.addEventListener('click',renderCalendar);return;}
   }
   if(!e)return renderCalendar();
-  if(['MATCH','TRAINING'].includes(e.eventType)&&requestedSection==='wellness')return renderActivityWellness(eventId);
+  if(['MATCH','TRAINING'].includes(e.eventType)&&!isNonClubCompetitionMatchClient_(e)&&requestedSection==='wellness')return renderActivityWellness(eventId);
   if(e.eventType==='MATCH'){
+    if(isCompetitionContextMatchClient_(e))return renderCompetitionContextMatch_(e,detailHeader);
     const role=contextRoleCategory_().toUpperCase(),hasClubReferee=detailHeader?!!detailHeader.hasClubReferee:eventHasClubRefereeClient_(eventId,d);
     const refereeView=isExternalRefereeMatchClient_(e)||(hasClubReferee&&(role==='REFEREE_COORDINATOR'||(role==='REFEREE'&&contextEventIds_().includes(String(eventId||'')))));
     if(refereeView){const refSection=['pre','post','documents','links','summary'].includes(requestedSection)?requestedSection:'summary';return renderRefereeMatchWorkspace(eventId,refSection);}

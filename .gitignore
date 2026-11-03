@@ -13,3 +13,13 @@ reports/
 # Python cache
 __pycache__/
 *.py[cod]
+
+# FAR importer live snapshots
+tools/far-importer/tests/fixtures/*-live-sample.html
+
+# Python
+__pycache__/
+*.pyc
+
+# FAR importer generated reports
+reports/far-*.json

@@ -2,3 +2,14 @@
 # Supabase CLI local state
 supabase/.branches/
 supabase/.temp/
+
+# Python virtual environments
+tools/xlsx-import/.venv/
+
+# Local import reports / source data
+reports/
+*.xlsx
+
+# Python cache
+__pycache__/
+*.py[cod]

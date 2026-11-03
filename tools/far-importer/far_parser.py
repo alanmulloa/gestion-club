@@ -72,14 +72,58 @@ def _extract_labeled_value(cell, label: str) -> Optional[str]:
 
     for span in cell.find_all("span"):
         text = clean(span.get_text(" ", strip=True))
-        if normalized(text).startswith(label_norm):
-            small = span.find("small", class_="text-success")
-            if small:
-                value = clean(small.get_text(" ", strip=True))
-                return value or None
+
+        if not normalized(text).startswith(label_norm):
+            continue
+
+        preferred = span.find(
+            "small",
+            class_="text-success",
+        )
+
+        if preferred:
+            value = clean(
+                preferred.get_text(" ", strip=True)
+            )
+
+            if value:
+                return value
+
+        smalls = span.find_all("small")
+
+        for small in smalls:
+            value = clean(
+                small.get_text(" ", strip=True)
+            )
+
+            if not value:
+                continue
+
+            if normalized(value) == label_norm:
+                continue
+
+            if normalized(value).startswith(label_norm):
+                value = clean(
+                    value[len(label):]
+                )
+
+            if value:
+                return value
+
+        full_text = clean(
+            span.get_text(" ", strip=True)
+        )
+
+        if normalized(full_text).startswith(label_norm):
+            parts = full_text.split(":", 1)
+
+            if len(parts) == 2:
+                value = clean(parts[1])
+
+                if value:
+                    return value
 
     return None
-
 
 def _extract_team(cell) -> str:
     font = cell.find("font")

@@ -219,5 +219,160 @@ class FarDryRunTest(unittest.TestCase):
         )
 
 
+    def test_existing_provisional_match_is_reconciled(self):
+        html = """
+        <div class="row workingDayRow">
+          <a name="workingDay" id="workingDay_2287"></a>
+          <h4>Grupo 2. Jornada 2. Organizador: SAN ROQUE RC</h4>
+
+          <tbody class="calendarEventsTable">
+            <tr class="eventRow eventEnded">
+              <td>21/11/2026<br>10:00</td>
+              <td>
+                <font>San Roque R.C.</font>
+              </td>
+              <td></td>
+              <td>
+                <a href="/es/public/competition/5000/match_statistics/">
+                  0 - 0
+                </a>
+              </td>
+              <td></td>
+              <td>
+                <font>Marbella R.C.</font>
+              </td>
+              <td></td>
+            </tr>
+          </tbody>
+        </div>
+        """
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "sample.html"
+            path.write_text(html)
+
+            first = build_report(
+                [{
+                    "key": "35/65",
+                    "name": "Test",
+                    "category": "M16",
+                    "file": path,
+                }],
+                club_names=["Marbella R.C."],
+                referee_names=[],
+            )
+
+            incoming = first["selected_matches"][0]
+
+            provisional = {
+                "external_id": (
+                    "matchready:35/65:"
+                    "working-day:2287:slot:1"
+                ),
+                "reconciliation_key": (
+                    incoming["reconciliation_key"]
+                ),
+            }
+
+            report = build_report(
+                [{
+                    "key": "35/65",
+                    "name": "Test",
+                    "category": "M16",
+                    "file": path,
+                }],
+                club_names=["Marbella R.C."],
+                referee_names=[],
+                existing_matches=[provisional],
+            )
+
+        self.assertEqual(
+            0,
+            report["counts"]["new_matches"],
+        )
+
+        self.assertEqual(
+            1,
+            report["counts"]["reconciliations"],
+        )
+
+        self.assertEqual(
+            0,
+            report["counts"]["reconciliation_conflicts"],
+        )
+
+        reconciliation = report["reconciliations"][0]
+
+        self.assertEqual(
+            provisional["external_id"],
+            reconciliation["from_external_id"],
+        )
+
+        self.assertEqual(
+            "matchready:5000",
+            reconciliation["to_external_id"],
+        )
+
+
+    def test_selected_match_has_club_venue_role(self):
+        html = """
+        <div class="row workingDayRow">
+          <a name="workingDay" id="workingDay_2288"></a>
+          <h4>Grupo 2. Jornada 3. Organizador: MARBELLA RC</h4>
+
+          <tbody class="calendarEventsTable">
+            <tr class="eventRow eventEnded">
+              <td>19/12/2026<br>10:00</td>
+              <td>
+                <font>San Roque R.C.</font>
+              </td>
+              <td></td>
+              <td>
+                <a href="/es/public/competition/5001/match_statistics/">
+                  0 - 0
+                </a>
+              </td>
+              <td></td>
+              <td>
+                <font>Marbella R.C.</font>
+                <span>
+                  <b><small>Campo: </small></b>
+                  <small>
+                    Instalaciones Deportivas Roberto Osborne
+                  </small>
+                </span>
+              </td>
+              <td></td>
+            </tr>
+          </tbody>
+        </div>
+        """
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "sample.html"
+            path.write_text(html)
+
+            report = build_report(
+                [{
+                    "key": "35/65",
+                    "name": "Test",
+                    "category": "M16",
+                    "file": path,
+                }],
+                club_names=["Marbella R.C.", "MARBELLA RC"],
+                referee_names=[],
+                home_venues=[
+                    "Instalaciones Deportivas Roberto Osborne"
+                ],
+            )
+
+        selected = report["selected_matches"][0]
+
+        self.assertEqual(
+            "LOCAL",
+            selected["club_venue_role"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

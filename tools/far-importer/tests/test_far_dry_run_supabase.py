@@ -29,6 +29,7 @@ class FarDryRunSupabaseTest(unittest.TestCase):
         names = load_club_referee_names(
             supabase_url="http://127.0.0.1:54321",
             supabase_key="test-key",
+            organization_id="marbella",
         )
 
         mocked_create_client.assert_called_once_with(
@@ -36,7 +37,10 @@ class FarDryRunSupabaseTest(unittest.TestCase):
             "test-key",
         )
 
-        mocked_load_referees.assert_called_once_with(client)
+        mocked_load_referees.assert_called_once_with(
+            client,
+            organization_id="marbella",
+        )
 
         self.assertEqual(
             [
@@ -52,6 +56,7 @@ class FarDryRunSupabaseTest(unittest.TestCase):
             load_club_referee_names(
                 supabase_url="",
                 supabase_key="",
+                organization_id="",
             )
 
 

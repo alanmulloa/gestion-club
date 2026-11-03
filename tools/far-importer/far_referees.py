@@ -25,11 +25,18 @@ def select_active_referee_names(rows) -> list[str]:
     referees = {}
 
     for row in rows:
-        status = clean(
+        membership_status = clean(
             row.get("membership_status")
         ).upper()
 
-        if status != "ACTIVE":
+        season_status = clean(
+            row.get("season_status")
+        ).upper()
+
+        if membership_status != "ACTIVE":
+            continue
+
+        if season_status != "ACTIVE":
             continue
 
         membership_role_code = clean(
@@ -62,8 +69,8 @@ def select_active_referee_names(rows) -> list[str]:
             continue
 
         person_id = clean(row.get("person_id"))
-
         key = person_id or name.casefold()
+
         referees[key] = name
 
     return sorted(
@@ -72,17 +79,32 @@ def select_active_referee_names(rows) -> list[str]:
     )
 
 
-def load_active_referee_names(client) -> list[str]:
+def load_active_referee_names(
+    client,
+    *,
+    organization_id: str,
+) -> list[str]:
+    if not clean(organization_id):
+        raise ValueError(
+            "organization_id is required "
+            "to load active club referees"
+        )
+
     result = (
         client.table("person_memberships")
         .select(
             "person_id,"
+            "organization_id,"
+            "season_id,"
             "status,"
             "role_code,"
             "persons!inner(first_name,last_name),"
-            "membership_roles(code,category)"
+            "membership_roles(code,category),"
+            "seasons!inner(status)"
         )
+        .eq("organization_id", organization_id)
         .eq("status", "ACTIVE")
+        .eq("seasons.status", "ACTIVE")
         .execute()
     )
 
@@ -91,6 +113,7 @@ def load_active_referee_names(client) -> list[str]:
     for membership in result.data or []:
         person = membership.get("persons") or {}
         role = membership.get("membership_roles") or {}
+        season = membership.get("seasons") or {}
 
         rows.append({
             "person_id": membership.get("person_id"),
@@ -100,6 +123,7 @@ def load_active_referee_names(client) -> list[str]:
             "membership_role_code": membership.get("role_code"),
             "role_code": role.get("code"),
             "role_category": role.get("category"),
+            "season_status": season.get("status"),
         })
 
     return select_active_referee_names(rows)

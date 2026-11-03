@@ -24,6 +24,7 @@ def load_club_referee_names(
     *,
     supabase_url,
     supabase_key,
+    organization_id,
 ):
     if not supabase_url or not supabase_key:
         raise ValueError(
@@ -36,7 +37,10 @@ def load_club_referee_names(
         supabase_key,
     )
 
-    return load_active_referee_names(client)
+    return load_active_referee_names(
+        client,
+        organization_id=organization_id,
+    )
 
 
 def build_report(
@@ -278,6 +282,11 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--organization-id",
+        default=os.environ.get("FAR_ORGANIZATION_ID"),
+    )
+
     args = parser.parse_args()
 
     if args.files and (not args.m16 or not args.m18):
@@ -294,6 +303,7 @@ def main():
         referee_names = load_club_referee_names(
             supabase_url=args.supabase_url,
             supabase_key=args.supabase_key,
+            organization_id=args.organization_id,
         )
     except ValueError as exc:
         parser.error(str(exc))

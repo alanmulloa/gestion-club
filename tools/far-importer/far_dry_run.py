@@ -15,6 +15,10 @@ from supabase import create_client
 from far_fetch import fetch_calendar_html
 from far_parser import parse_calendar_file, normalized
 from far_referees import load_active_referee_names
+from far_organization import load_matchready_configuration
+from far_existing import load_existing_matches
+from far_reconciliation import classify_matches
+from far_venue import resolve_club_venue_role
 
 
 VERSION = "0.3.0"
@@ -43,11 +47,62 @@ def load_club_referee_names(
     )
 
 
+
+def load_supabase_context(
+    *,
+    supabase_url,
+    supabase_key,
+    organization_id,
+    season_id,
+):
+    if not supabase_url:
+        raise ValueError("supabase_url is required")
+
+    if not supabase_key:
+        raise ValueError("supabase_key is required")
+
+    if not organization_id:
+        raise ValueError("organization_id is required")
+
+    if not season_id:
+        raise ValueError("season_id is required")
+
+    client = create_client(
+        supabase_url,
+        supabase_key,
+    )
+
+    organization = load_matchready_configuration(
+        client,
+        organization_id=organization_id,
+    )
+
+    referee_names = load_active_referee_names(
+        client,
+        organization_id=organization_id,
+    )
+
+    existing_matches = load_existing_matches(
+        client,
+        organization_id=organization_id,
+        season_id=season_id,
+    )
+
+    return {
+        "club_names": organization["club_names"],
+        "home_venues": organization["home_venues"],
+        "referee_names": referee_names,
+        "existing_matches": existing_matches,
+    }
+
+
 def build_report(
     calendars,
     *,
     club_names,
     referee_names,
+    existing_matches=None,
+    home_venues=None,
 ):
     all_matches = []
 
@@ -128,6 +183,16 @@ def build_report(
 
         enriched = dict(match)
         enriched["selection_reasons"] = reasons
+        enriched["club_venue_role"] = (
+            resolve_club_venue_role(
+                home_team=match["home_team"],
+                away_team=match["away_team"],
+                venue_name=match["field"],
+                organizer_name=match["organizer"],
+                club_names=club_names,
+                home_venues=home_venues or [],
+            )
+        )
 
         if reasons:
             selected.append(enriched)
@@ -166,6 +231,11 @@ def build_report(
                 "teams": len(appearances),
             })
 
+    reconciliation = classify_matches(
+        incoming_matches=selected,
+        existing_matches=existing_matches or [],
+    )
+
     return {
         "version": VERSION,
         "mode": "DRY_RUN",
@@ -195,9 +265,31 @@ def build_report(
             ),
             "duplicates_detected": len(duplicates),
             "ignored_matches": len(ignored),
+            "new_matches": len(
+                reconciliation["new_matches"]
+            ),
+            "unchanged_matches": len(
+                reconciliation["unchanged_matches"]
+            ),
+            "reconciliations": len(
+                reconciliation["reconciliations"]
+            ),
+            "reconciliation_conflicts": len(
+                reconciliation["conflicts"]
+            ),
         },
         "triangulars": triangulars,
         "selected_matches": selected,
+        "new_matches": reconciliation["new_matches"],
+        "unchanged_matches": (
+            reconciliation["unchanged_matches"]
+        ),
+        "reconciliations": (
+            reconciliation["reconciliations"]
+        ),
+        "reconciliation_conflicts": (
+            reconciliation["conflicts"]
+        ),
         "duplicates": duplicates,
         "ignored_matches": ignored,
         "errors": [],
@@ -287,6 +379,11 @@ def main():
         default=os.environ.get("FAR_ORGANIZATION_ID"),
     )
 
+    parser.add_argument(
+        "--season-id",
+        default=os.environ.get("FAR_SEASON_ID"),
+    )
+
     args = parser.parse_args()
 
     if args.files and (not args.m16 or not args.m18):
@@ -300,13 +397,15 @@ def main():
         )
 
     try:
-        referee_names = load_club_referee_names(
+        context = load_supabase_context(
             supabase_url=args.supabase_url,
             supabase_key=args.supabase_key,
             organization_id=args.organization_id,
+            season_id=args.season_id,
         )
     except ValueError as exc:
         parser.error(str(exc))
+
 
     if args.live:
         with tempfile.TemporaryDirectory(
@@ -333,11 +432,10 @@ def main():
 
             report = build_report(
                 calendars,
-                club_names=[
-                    "Marbella R.C.",
-                    "MARBELLA RC",
-                ],
-                referee_names=referee_names,
+                club_names=context["club_names"],
+                referee_names=context["referee_names"],
+                home_venues=context["home_venues"],
+                existing_matches=context["existing_matches"],
             )
 
             report["source_mode"] = "LIVE"
@@ -350,18 +448,17 @@ def main():
 
         report = build_report(
             calendars,
-            club_names=[
-                "Marbella R.C.",
-                "MARBELLA RC",
-            ],
-            referee_names=referee_names,
+            club_names=context["club_names"],
+            referee_names=context["referee_names"],
+            home_venues=context["home_venues"],
+            existing_matches=context["existing_matches"],
         )
 
         report["source_mode"] = "FILES"
 
     report["referee_source"] = "SUPABASE"
-    report["club_referees_detected"] = len(referee_names)
-    report["club_referees"] = referee_names
+    report["club_referees_detected"] = len(context["referee_names"])
+    report["club_referees"] = context["referee_names"]
 
     output = Path(args.report)
     output.parent.mkdir(

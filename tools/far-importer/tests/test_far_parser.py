@@ -413,5 +413,45 @@ class FarParserTest(unittest.TestCase):
         )
 
 
+    def test_field_is_parsed_without_text_success_class(self):
+        html = """
+        <div class="row workingDayRow">
+          <a name="workingDay" id="workingDay_2288"></a>
+          <h4>Grupo 2. Jornada 3. Organizador: MARBELLA RC</h4>
+          <tbody class="calendarEventsTable">
+            <tr class="eventRow eventPending">
+              <td>19/12/2026<br>10:00</td>
+              <td>
+                <font>San Roque R.C.</font>
+              </td>
+              <td></td>
+              <td></td>
+              <td></td>
+              <td>
+                <font>Marbella R.C.</font>
+                <span>
+                  <b><small>Campo: </small></b>
+                  <small>
+                    Instalaciones Deportivas Roberto Osborne
+                  </small>
+                </span>
+              </td>
+              <td></td>
+            </tr>
+          </tbody>
+        </div>
+        """
+
+        matches = parse_calendar_html(
+            html,
+            calendar_key="35/65",
+        )
+
+        self.assertEqual(
+            "Instalaciones Deportivas Roberto Osborne",
+            matches[0].field,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
